@@ -26,15 +26,41 @@ import os
 import sys
 import urllib.request
 
-# name, PDB id, chain the partner occupies the site of, expected target length,
-# what the partner is, and what the site is.
+# One entry per target.
+#   want_len       expected residue count of the chain we design against; used to
+#                  pick the chain, and a mismatch is reported, not silently taken
+#   chain          force the target chain instead of picking by length
+#   partner_chain  force which chain defines the epitope. REQUIRED whenever the
+#                  entry holds more than one thing touching the target, because
+#                  "most contacts wins" picks the biggest neighbour, not the
+#                  therapeutically interesting one
 TARGETS = [
-    ("pd1",    "4ZQK", 115, "PD-L1 (chain B)",        "PD-L1 interface"),
-    ("pcsk9",  "3BPS", 450, "EGF-A domain of LDLR",   "EGF-A groove"),
-    ("bcl2",   "2XA0", 170, "navitoclax-like ligand", "BH3 groove"),
-    ("brca1",  "1T29", 210, "phosphopeptide",         "BRCT phosphopeptide site"),
-    ("glp1r",  "3IOL", 120, "exendin-4 peptide",      "peptide-binding face of the ECD"),
-    ("casp3",  "2J30", 150, "active-site inhibitor",  "substrate groove"),
+    {"name": "pd1", "pdb": "4ZQK", "want_len": 115,
+     "partner_desc": "the other half of the PD-1/PD-L1 pair",
+     "site": "PD-1/PD-L1 interface"},
+
+    # Chain P is PCSK9's own prodomain and chain E is the EGF-A domain of LDLR.
+    # The prodomain contacts more of the catalytic domain, so picking by contact
+    # count aims the run at an intramolecular interface instead of the drug site.
+    {"name": "pcsk9", "pdb": "3BPS", "want_len": 435, "partner_chain": "E",
+     "partner_desc": "EGF-A domain of LDLR", "site": "EGF-A groove"},
+
+    # Chain C is the BAX BH3 peptide; B and D are a second copy in the cell.
+    {"name": "bcl2", "pdb": "2XA0", "want_len": 137, "partner_chain": "C",
+     "partner_desc": "BAX BH3 peptide", "site": "BH3 groove"},
+
+    {"name": "brca1", "pdb": "1T29", "want_len": 211, "partner_chain": "B",
+     "partner_desc": "phosphorylated BACH1 peptide",
+     "site": "BRCT phosphopeptide site"},
+
+    {"name": "glp1r", "pdb": "3IOL", "want_len": 100, "partner_chain": "B",
+     "partner_desc": "GLP-1 / exendin-4 peptide",
+     "site": "peptide-binding face of the ECD"},
+
+    # 2J30 is PROcaspase-3: one uncleaved 245-residue chain, not the mature
+    # p17/p12 pair, and the 174->180 break is the activation loop.
+    {"name": "casp3", "pdb": "2J30", "want_len": 245, "partner_chain": "B",
+     "partner_desc": "active-site inhibitor", "site": "substrate groove"},
 ]
 
 AA3 = {
@@ -101,6 +127,38 @@ def parse(path):
     return " ".join(title), prot, het
 
 
+def chain_molecules(path):
+    """{chain letter: molecule name} from the COMPND records.
+
+    This is what says which protein a chain actually is. Two chains of similar
+    length (PD-1 and PD-L1 are both ~110 residue Ig domains) cannot be told
+    apart by size, and picking the wrong one aims the whole run at the wrong
+    protein while every other number still looks reasonable.
+    """
+    out, molecule = {}, None
+    pending = ""
+    with open(path) as fh:
+        for line in fh:
+            if line[:6] != "COMPND":
+                if out or molecule:
+                    break
+                continue
+            text = line[10:80].strip()
+            pending = (pending + " " + text).strip() if pending else text
+            if not pending.endswith(";"):
+                continue
+            field = pending.rstrip(";")
+            pending = ""
+            if field.startswith("MOLECULE:"):
+                molecule = field[len("MOLECULE:"):].strip()
+            elif field.startswith("CHAIN:") and molecule:
+                for c in field[len("CHAIN:"):].split(","):
+                    c = c.strip()
+                    if c:
+                        out[c] = molecule
+    return out
+
+
 def chain_lengths(prot):
     seen, order = {}, {}
     for a in prot:
@@ -140,7 +198,14 @@ def main():
     os.makedirs(indir, exist_ok=True)
     rows, problems = [], []
 
-    for name, pdb_id, want_len, partner_desc, site_desc in TARGETS:
+    for spec in TARGETS:
+        name = spec["name"]
+        pdb_id = spec["pdb"]
+        want_len = spec["want_len"]
+        partner_desc = spec["partner_desc"]
+        site_desc = spec["site"]
+        force_chain = spec.get("chain")
+        force_partner = spec.get("partner_chain")
         raw = os.path.join(indir, "%s.pdb" % pdb_id)
         print("=" * 72)
         try:
@@ -159,14 +224,28 @@ def main():
             continue
 
         lens = chain_lengths(prot)
+        mols = chain_molecules(raw)
         print("  chains: %s" % ", ".join(
             "%s=%d" % (c, n) for c, n in sorted(lens.items())))
+        for c in sorted(lens):
+            print("    chain %s  %d res  %s" % (c, lens[c], mols.get(c, "(unnamed)")))
 
-        # pick the chain closest to the expected domain length
-        chain = min(lens, key=lambda c: abs(lens[c] - want_len))
+        # the named chain if the entry forces one, else the closest to the
+        # expected domain length
+        if force_chain:
+            if force_chain not in lens:
+                problems.append("%s: forced chain %s absent (have %s)"
+                                % (name, force_chain, sorted(lens)))
+                print("  *** FORCED CHAIN %s ABSENT" % force_chain)
+                continue
+            chain = force_chain
+        else:
+            chain = min(lens, key=lambda c: abs(lens[c] - want_len))
         got = lens[chain]
-        print("  chose chain %s (%d residues; expected ~%d) -- site: %s"
-              % (chain, got, want_len, site_desc))
+        print("  chose chain %s = %s" % (chain, mols.get(chain, "(unnamed)")))
+        print("    %d residues; expected ~%d%s -- site: %s"
+              % (got, want_len,
+                 " [forced]" if force_chain else "", site_desc))
         off = abs(got - want_len) / float(want_len)
         if off > LEN_TOLERANCE:
             msg = ("%s: chain %s has %d residues, expected ~%d (%.0f%% off)"
@@ -200,8 +279,11 @@ def main():
             print("  no chain breaks")
         print("  contig: %s" % contig)
 
-        # hotspots, measured against whatever partner is in the crystal
-        partner = [a for a in prot if a["chain"] != chain] + het
+        # hotspots, measured against the partner in the crystal.
+        # Exclude anything on the target's OWN chain: a ligand or modified
+        # residue carries the target's chain letter and would otherwise be
+        # counted as a binding partner against itself.
+        partner = [a for a in prot + het if a["chain"] != chain]
         if not partner:
             problems.append("%s: no partner in the file, cannot derive hotspots"
                             % name)
@@ -231,10 +313,28 @@ def main():
 
         counts = {}
         if per_partner:
-            best = max(per_partner, key=lambda c: sum(per_partner[c].values()))
+            if force_partner:
+                # Named explicitly, because contact count picks the biggest
+                # neighbour and that is not always the site we care about. On
+                # 3BPS the prodomain outranks the EGF-A domain we are aiming at.
+                if force_partner not in per_partner:
+                    problems.append(
+                        "%s: forced partner chain %s has no contacts (in contact: %s)"
+                        % (name, force_partner, sorted(per_partner)))
+                    print("  *** FORCED PARTNER %s NOT IN CONTACT" % force_partner)
+                    continue
+                best = force_partner
+            else:
+                best = max(per_partner, key=lambda c: sum(per_partner[c].values()))
+                if len(per_partner) > 1:
+                    problems.append(
+                        "%s: %d things touch the target and no partner_chain is set; "
+                        "picked %s by contact count - confirm it is the right site"
+                        % (name, len(per_partner), best))
             counts = per_partner[best]
-            partner_desc = "%s, chain %s (%d atoms)" % (
-                partner_desc, best, len(by_chain[best]))
+            partner_desc = "%s, chain %s (%d atoms)%s" % (
+                partner_desc, best, len(by_chain[best]),
+                " [forced]" if force_partner else "")
 
         if not counts:
             problems.append("%s: partner present but zero contacts" % name)
