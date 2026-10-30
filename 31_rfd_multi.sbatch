@@ -72,6 +72,24 @@ cd "$ROOT/RFdiffusion"
 mkdir -p "$ROOT/outputs"
 nvidia-smi --query-gpu=name --format=csv,noheader
 
+# The radius-of-gyration potential is a switch so it can be A/B tested. Whether
+# it fires at all is an open question as of 2026-10-30: the IL-6 arms came back
+# at 23-24% pass with it supposedly on, no better than a run without it.
+# POTENTIALS=0 turns it off and changes nothing else.
+POT_ARGS=()
+if [ "${POTENTIALS:-1}" = "1" ]; then
+  POT_ARGS=(
+    'potentials.guiding_potentials=["type:binder_ROG,weight:3"]'
+    potentials.guide_scale=2
+    potentials.guide_decay=quadratic
+  )
+fi
+
+# Print the exact arguments, so a later log says what was actually passed
+# instead of leaving us to infer it. Absence of a log line is not evidence.
+echo "POTENTIALS=${POTENTIALS:-1}"
+echo "potential args: ${POT_ARGS[*]-(none)}"
+
 python scripts/run_inference.py \
   inference.output_prefix="$ROOT/outputs/${NAME}_${TAG}" \
   inference.model_directory_path="$ROOT/models" \
@@ -81,9 +99,7 @@ python scripts/run_inference.py \
   diffuser.T="$DIFFUSER_T" \
   "contigmap.contigs=[${CONTIG}/0 ${BINDER_LEN}]" \
   "ppi.hotspot_res=[${HOTSPOTS}]" \
-  'potentials.guiding_potentials=["type:binder_ROG,weight:3"]' \
-  potentials.guide_scale=2 \
-  potentials.guide_decay="quadratic"
+  ${POT_ARGS[@]+"${POT_ARGS[@]}"}
 
 echo "=== done: ${NAME} ==="
 ls -lh "$ROOT/outputs" | grep "${NAME}_${TAG}" | tail -3
@@ -92,5 +108,5 @@ EOS
 srun --container-image="$IMAGE" \
      --container-mounts="/home/$USER:/workspace" \
      --container-workdir=/workspace \
-     --export=ALL,NUM_DESIGNS="$NUM_DESIGNS",DIFFUSER_T="$DIFFUSER_T",BINDER_LEN="$BINDER_LEN",CONTIG="$CONTIG",HOTSPOTS="$HOTSPOTS",NAME="$NAME",TAG="$TAG" \
+     --export=ALL,POTENTIALS="${POTENTIALS:-1}",NUM_DESIGNS="$NUM_DESIGNS",DIFFUSER_T="$DIFFUSER_T",BINDER_LEN="$BINDER_LEN",CONTIG="$CONTIG",HOTSPOTS="$HOTSPOTS",NAME="$NAME",TAG="$TAG" \
      bash "/workspace/rfd/_run_multi_${IDX}.sh"
