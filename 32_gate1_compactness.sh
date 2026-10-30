@@ -70,7 +70,7 @@ for NAME in $NAMES; do
   # A median near 2.2 means the whole target came out as rods, which points at the
   # run (potential missing, hotspots scattered) rather than at luck.
   case "$MED" in
-    2.0*|2.1*|2.2*|2.3*) NOTE="median is rod-like - check the ROG potential and hotspots" ;;
+    2.0*|2.1*|2.2*|2.3*) NOTE="median is a rod - try a longer binder before touching the ROG potential" ;;
   esac
   [ "${NPASS:-0}" = "0" ] && NOTE="NOTHING PASSED - do not run stage 2 on this target"
   printf "%-8s %6s %6s %7s %7s %s\n" "$NAME" "$NTOT" "$NPASS" "$RATE" "$MED" "$NOTE"

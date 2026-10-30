@@ -26,7 +26,7 @@
 #SBATCH --cpus-per-task=10
 #SBATCH --mem=48G
 #SBATCH --gres=gpu:1
-#SBATCH --time=01:30:00
+#SBATCH --time=04:00:00
 #SBATCH --output=logs/sc_b1_%A_%a.out
 #SBATCH --error=logs/sc_b1_%A_%a.err
 
@@ -55,7 +55,7 @@ SCORE="sc_${NAME}_${TAG}_${STAMP}.sc"
 
 echo "node: $(hostname)  job: $SLURM_JOB_ID  task: $IDX"
 echo "target: $NAME   inputs: $NIN   score file: $SCORE"
-echo "expect ~70 s per structure, so roughly $(( NIN * 70 / 60 )) min"
+echo "expect ~25 s per structure (measured: job 174717 did 40 in 15:58), so roughly $(( NIN * 25 / 60 )) min"
 
 INNER="$HOME/rfd/_run_sc_${IDX}.sh"
 
