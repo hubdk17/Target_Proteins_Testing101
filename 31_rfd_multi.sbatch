@@ -56,7 +56,8 @@ test -n "$HOTSPOTS"   || { echo "empty hotspots for $NAME"; exit 1; }
 echo "node: $(hostname)  job: $SLURM_JOB_ID  task: $IDX"
 echo "target: $NAME ($PDBID)"
 echo "contig: [${CONTIG}/0 ${BINDER_LEN}]"
-echo "hotspots: ${HOTSPOTS}"
+NHOT=$(printf '%s' "$HOTSPOTS" | tr ',' '\n' | grep -c .)
+echo "hotspots: ${HOTSPOTS}  (${NHOT})"
 echo "designs: $NUM_DESIGNS   T: $DIFFUSER_T"
 
 # Per-task inner script. A shared filename would have array tasks overwrite
@@ -90,6 +91,16 @@ fi
 echo "POTENTIALS=${POTENTIALS:-1}"
 echo "potential args: ${POT_ARGS[*]-(none)}"
 
+# Compare what arrived with what was sent. The hotspot list crossed a process
+# boundary that eats commas once already; this is the check that would have
+# caught it on design 1 instead of after 300.
+GOT=$(printf '%s' "$HOTSPOTS" | tr ',' '\n' | grep -c .)
+echo "hotspots received: $HOTSPOTS ($GOT of ${NHOT:-?} expected)"
+if [ -n "${NHOT:-}" ] && [ "$GOT" != "$NHOT" ]; then
+  echo "*** HOTSPOTS TRUNCATED in transit - refusing to waste a GPU on a mis-aimed run"
+  exit 1
+fi
+
 python scripts/run_inference.py \
   inference.output_prefix="$ROOT/outputs/${NAME}_${TAG}" \
   inference.model_directory_path="$ROOT/models" \
@@ -105,8 +116,17 @@ echo "=== done: ${NAME} ==="
 ls -lh "$ROOT/outputs" | grep "${NAME}_${TAG}" | tail -3
 EOS
 
+# Export into the job environment and propagate the whole thing with
+# --export=ALL. Do NOT list NAME=VALUE pairs in --export: that list is itself
+# comma-separated, so Slurm truncated HOTSPOTS="A107,A104,A108,A118,A146" at the
+# first comma and RFdiffusion received a single hotspot residue. That is what
+# happened to all 300 backbones on 2026-10-29, silently, because nothing
+# compared what was sent with what arrived.
+export POTENTIALS="${POTENTIALS:-1}"
+export NUM_DESIGNS DIFFUSER_T BINDER_LEN CONTIG HOTSPOTS NAME TAG NHOT
+
 srun --container-image="$IMAGE" \
      --container-mounts="/home/$USER:/workspace" \
      --container-workdir=/workspace \
-     --export=ALL,POTENTIALS="${POTENTIALS:-1}",NUM_DESIGNS="$NUM_DESIGNS",DIFFUSER_T="$DIFFUSER_T",BINDER_LEN="$BINDER_LEN",CONTIG="$CONTIG",HOTSPOTS="$HOTSPOTS",NAME="$NAME",TAG="$TAG" \
+     --export=ALL \
      bash "/workspace/rfd/_run_multi_${IDX}.sh"
