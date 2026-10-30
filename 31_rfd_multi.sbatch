@@ -113,7 +113,12 @@ python scripts/run_inference.py \
   ${POT_ARGS[@]+"${POT_ARGS[@]}"}
 
 echo "=== done: ${NAME} ==="
-ls -lh "$ROOT/outputs" | grep "${NAME}_${TAG}" | tail -3
+# `|| true` because this is a diagnostic, and under `set -o pipefail` its exit
+# code would become the job's. Job 174981 produced all 50 designs and still
+# reported FAILED 127:0 on a trailing line like this one.
+ls -lh "$ROOT/outputs" | grep "${NAME}_${TAG}" | tail -3 || true
+echo "design files now on disk: $(ls "$ROOT/outputs/${NAME}_${TAG}"_*.pdb 2>/dev/null | wc -l)"
+exit 0
 EOS
 
 # Export into the job environment and propagate the whole thing with
