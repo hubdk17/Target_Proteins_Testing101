@@ -20,7 +20,12 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
-#SBATCH --time=02:00:00
+# 02:00:00 truncated the 2026-10-30 h5 batch: only glp1r (100 residues) reached 50
+# designs, and the counts fell off strictly with target size - pd1 48, bcl2 42,
+# brca1 34, casp3 30, pcsk9 19. Per-design cost also ran ~5x the b1 batch on the
+# same targets, so headroom matters more than the nominal rate suggests. defq has
+# no time limit; an over-long request costs nothing but queue position.
+#SBATCH --time=08:00:00
 #SBATCH --output=logs/%x_%A_%a.out
 #SBATCH --error=logs/%x_%A_%a.err
 
