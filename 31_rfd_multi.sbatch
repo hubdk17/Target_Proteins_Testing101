@@ -21,8 +21,8 @@
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
 #SBATCH --time=02:00:00
-#SBATCH --output=logs/rfd_b1_%A_%a.out
-#SBATCH --error=logs/rfd_b1_%A_%a.err
+#SBATCH --output=logs/%x_%A_%a.out
+#SBATCH --error=logs/%x_%A_%a.err
 
 IMAGE=/home/hpc_apps/nvidia+pytorch+25.04-py3.sqsh
 TABLE="$HOME/rfd/inputs/targets.tsv"
