@@ -133,7 +133,7 @@ def main():
             out = os.path.join(IN, f"{name}_{arm}_clean.pdb")
             kept, dropped = write_arm(atoms, out, key, newname, strip)
             paths[arm] = out
-            print(f"    {arm:3}  residue 157-equivalent kept {kept} atom(s), dropped {dropped}")
+            print(f"    {arm:3}  {hs} kept {kept} atom(s), dropped {dropped}")
             out_rows.append([f"{name}_{arm}", pdbid, "", "", contig, hotspots])
 
         # --- integrity checks, each able to fail ---
