@@ -30,7 +30,9 @@
 #SBATCH --error=logs/%x_%A_%a.err
 
 IMAGE=/home/hpc_apps/nvidia+pytorch+25.04-py3.sqsh
-TABLE="$HOME/rfd/inputs/targets.tsv"
+# Overridable so the same tested script can drive a different experiment:
+#   TABLE=$HOME/rfd/inputs/mut_arms.tsv  for the three-arm mutation comparison.
+TABLE="${TABLE:-$HOME/rfd/inputs/targets.tsv}"
 
 NUM_DESIGNS="${NUM_DESIGNS:-50}"
 DIFFUSER_T="${DIFFUSER_T:-50}"
