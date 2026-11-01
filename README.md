@@ -5,6 +5,11 @@ Thapar AI Foundry cluster. They expect to live in `~/rfd/` next to the existing
 `RFdiffusion`, `ProteinMPNN` and `dl_binder_design` clones and the `venv*`
 environments.
 
+The write-ups that go with these scripts — the procedure, the per-target results
+and the run logs — are in **[docs/](docs/README.md)**. That index also lists the
+results that exist only as job output on the cluster and have no document here
+yet.
+
 ## Setup on the cluster
 
 ```
