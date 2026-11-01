@@ -1,0 +1,70 @@
+# ChimeraX scene: IL-6 (1ALU) with designed binder short_9
+#
+# Run from the directory holding il6_binder_site3_short_9.pdb:
+#     open view_short9.cxc
+# or in ChimeraX:  File > Open > this file
+#
+# NOTE: chain B is RFdiffusion output, which is BACKBONE ONLY. Every residue
+# is a glycine placeholder, so there are no side chains to show on the binder.
+# Judge its shape from the cartoon, not from its chemistry.
+
+open il6_binder_site3_short_9.pdb
+
+# --- base scene -------------------------------------------------------------
+hide atoms
+show cartoon
+set bgColor white
+lighting soft
+graphics silhouettes true
+
+color /A gray(70)
+color /B cornflowerblue
+
+# --- IL-6 surface, so you can see where the binder actually lands -----------
+surface /A
+transparency /A 60 surfaces
+
+# --- the hotspots we conditioned on -----------------------------------------
+# A47 (helix A tail), A155/A157/A158 (helix D start)
+show /A:47,155,157,158 atoms
+style /A:47,155,157,158 stick
+color /A:47,155,157,158 orange
+
+# Trp157: the dominant site III hotspot, ~25% of buried surface there
+color /A:157 red
+label /A:157 residues text "W157"
+
+# --- the binder residues we measured within 10 A of IL-6 --------------------
+# 3-15 contiguous (helix 1 lying along the target), 18, then 27/31/34/38
+# (one face of helix 2). 19-26 is the turn and touches nothing.
+color /B:3-15,18 gold
+color /B:27,31,34,38 yellow
+
+view
+
+# ============================================================================
+# Extras. Paste these one at a time in the ChimeraX command line.
+# ============================================================================
+#
+# Is it really a helical hairpin? Strip the target and look at the binder alone.
+# My claim from the sequence periodicity was two amphipathic helices packing
+# together. This is the check:
+#     ~surface /A
+#     hide /A cartoon
+#     view /B
+#
+# Put the target back:
+#     show /A cartoon
+#     surface /A
+#     transparency /A 60 surfaces
+#     view
+#
+# Colour the binder by secondary structure, to count the helices:
+#     color /B byattribute ss_type
+#
+# How buried is W157 by the binder?
+#     surface /A enclose /A
+#     measure buriedarea /A /B
+#
+# Save a figure:
+#     save short9_siteIII.png width 1600 supersample 3
