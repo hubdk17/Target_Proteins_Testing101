@@ -28,7 +28,7 @@
 #SBATCH --error=logs/%x_%A_%a.err
 
 IMAGE=/home/hpc_apps/nvidia+pytorch+25.04-py3.sqsh
-TABLE="$HOME/rfd/inputs/targets.tsv"
+TABLE="${TABLE:-$HOME/rfd/inputs/targets.tsv}"
 
 # 8 exposed the problem on IL-6 but is on the low side; gate 2 picks among these,
 # so give it a real choice.
@@ -42,7 +42,10 @@ IDX="${SLURM_ARRAY_TASK_ID:-1}"
 NAME=$(sed -n "${IDX}p" "$TABLE" | cut -f1)
 test -n "$NAME" || { echo "no line $IDX in $TABLE"; exit 1; }
 
-PASS="$HOME/rfd/gate1/${NAME}.pass"
+# PASSEXT=eqn reads the equal-n list from 60_equal_n_arms.py instead of the full
+# gate-1 survivor list. Default is unchanged.
+PASSEXT="${PASSEXT:-pass}"
+PASS="$HOME/rfd/gate1/${NAME}.${PASSEXT}"
 test -s "$PASS" || { echo "no $PASS - run 32_gate1_compactness.sh first"; exit 1; }
 
 # Stage the survivors into a per-target input directory. Copies, not symlinks:

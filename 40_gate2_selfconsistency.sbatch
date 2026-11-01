@@ -31,7 +31,7 @@
 #SBATCH --error=logs/%x_%A_%a.err
 
 IMAGE=/home/hpc_apps/nvidia+pytorch+25.04-py3.sqsh
-TABLE="$HOME/rfd/inputs/targets.tsv"
+TABLE="${TABLE:-$HOME/rfd/inputs/targets.tsv}"
 TAG="${TAG:-b1}"
 
 test -s "$TABLE" || { echo "$TABLE missing - run 02_prep_targets.py"; exit 1; }
