@@ -38,6 +38,7 @@ assert len(AA1TO3) == 20, "amino acid table is incomplete"
 
 ROOT = os.path.expanduser("~/rfd")
 BINDER_CHAIN = "B"
+PASSEXT = os.environ.get("PASSEXT", "pass")
 
 
 def seq_dir(name):
@@ -64,9 +65,10 @@ def read_fasta(path):
 
 
 def thread_one(name, problems):
-    pass_file = os.path.join(ROOT, "gate1", "%s.pass" % name)
+    # PASSEXT=eqn reads the equal-n list from 60_equal_n_arms.py.
+    pass_file = os.path.join(ROOT, "gate1", "%s.%s" % (name, PASSEXT))
     if not os.path.exists(pass_file):
-        problems.append("%s: no gate1/%s.pass - run 32_gate1_compactness.sh first"
+        problems.append("%s: no gate1/%s.{pass,eqn} - run 32_gate1_compactness.sh first"
                         % (name, name))
         return 0
     backbones = [l.strip() for l in open(pass_file) if l.strip()]
