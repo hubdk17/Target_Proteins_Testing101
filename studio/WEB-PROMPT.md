@@ -13,7 +13,23 @@ no GPU and no cloud account.
 
 Two things already exist and must be reused rather than reinvented.
 
-### 1. The verdict layer, in this repository: `studio/`
+### 1. The verdict layer: `studio/`
+
+> **Correction, 2026-11-09.** This section originally said "in this repository" and told you to
+> port `studio/review.py`. On a machine with no clone of the scripts repository, that had no
+> referent, and the first agent to run this brief correctly reported the package as missing.
+> `studio/` is real but it lives on the branch `claude/project-thread-b81vad` of
+> `github.com/hubdk17/Target_Proteins_Testing101` (pull request #3, not yet merged) — it is **not
+> on `main`** and **not on the local disk**. To read it:
+>
+> ```bash
+> git clone -b claude/project-thread-b81vad \
+>   https://github.com/hubdk17/Target_Proteins_Testing101.git pipeline
+> ```
+>
+> You do not need it to build the front end: write the contracts to the descriptions below and
+> keep `src/lib/mock/` swappable, which is what Step 9 asks for anyway. Read it when the real
+> backend is wired, and say in the README that the mock stands in for it.
 
 A Python package (see `studio/README.md`) that owns every threshold and every verdict. **The web
 app must never compute a verdict, a threshold or a pass rate.** It renders what the API returns.
@@ -257,8 +273,15 @@ fine:
    target the highest-contact chain is the wrong domain.
 3. **The hotspot set.** For each hotspot the user enters, read the residue label back out of the
    file and show it beside the number. Show the count, with a note that the count changes the
-   gate-1 pass rate (measured: 18.3% at one hotspot, 31.3% at five) and so changes the
-   statistics they will compare runs on.
+   gate-1 pass rate and so changes the statistics they will compare runs on.
+
+   **Do not put a percentage on this screen.** An earlier version of this brief quoted
+   "18.3% at one hotspot, 31.3% at five". Those figures are real and well-powered — equal n=50 in
+   all twelve cells, z=+3.69, p≈2e-4 — but they are **pooled over six different targets**, and
+   within that batch one target gained 28 points while another gained nothing at all. So as
+   guidance about the single target in front of the user they are misleading even though they are
+   correct. State it qualitatively: more hotspots aim a run that was aimed badly, and do not lift
+   a site that already works.
 4. **Anything rebuilt.** Run the chirality check and **refuse**. Never offer a "fix it" button:
    rebuilding is what causes the defect, and no later gate in the pipeline can see it.
 
@@ -288,11 +311,15 @@ This is where the product earns trust, and where a generic dashboard would quiet
 - **Two cells whose intervals overlap are not ordered.** Render them as one tier. The backend
   returns tiers; show tiers.
 - **There is no sort-by-confidence control anywhere in this app.** Not hidden, not behind a
-  toggle, not in a column menu. Confidence explains about 2.6% of the variance in whether a
-  design folds the way it was designed to, and the relationship inverts on roughly a third of
-  backbones, so sorting by it is near a coin toss. Sortable columns are fold-back RMSD, grip and
-  epitope coverage. If the API ever returns a confidence field, display it as context with that
-  caveat beside it, and do not make the column sortable.
+  toggle, not in a column menu. Pool-wide, the measured correlation between a design's confidence
+  and whether it folds the way it was designed to is **r = −0.162** — about 2.6% of the variance,
+  which is r² — and the relationship **inverts on 17 of 47 backbones**. Sorting by it is near a
+  coin toss. Sortable columns are fold-back RMSD, grip and epitope coverage. If the API ever
+  returns a confidence field, display it as context with that caveat beside it, and do not make
+  the column sortable.
+
+  (The 2.6% is derived from r, so it appears as a literal in no file; the script that measured r
+  is `53_confidence_vs_foldback.py` in the private repository, not in the pipeline folder.)
 - Copy the sibling app's honesty mechanism: it shows an amber badge driven by a
   `data_status.illustrative` flag, and a disabled entry for analyses that have not been run so
   the gap is visible in the UI rather than absent from it. Use the same approach for stages not
