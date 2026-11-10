@@ -1,0 +1,93 @@
+# The ONLY place a threshold lives.
+#
+# Every verdict the studio writes carries the SHA-256 of this file, so a result
+# can always be traced to the numbers that judged it. Change a number here and
+# old rows keep the old hash; they are not silently reinterpreted.
+#
+# Bump `version` on every edit. Never edit a number without bumping it.
+
+version = "1.0.0"
+
+[gate1]
+# Compactness. rho = Rg(CA) / (2.2 * N^0.38); rho ~ 1 is compact, ~2.2 is a rod.
+# A gate, not a tiebreaker: without it roughly half of fixed-length designs are
+# straight helices and contact counting alone selects exactly those.
+rho_max = 1.30
+# Designs whose rho sits within this much of the cut are reported as borderline.
+rho_borderline = 0.05
+
+[gate2]
+# Self-consistency: does the sequence fold back into the backbone it was
+# written for? Cx RMSD after Kabsch superposition, in Angstrom.
+foldback_rmsd_max = 2.0
+foldback_rmsd_borderline = 0.25
+# Minimum sequences per backbone. Within-backbone pae spread is 11-20 units, so
+# a pass belongs to the sequence and not to the backbone: screening one sequence
+# per backbone throws away the pool's best designs. Refuse to run below this.
+min_sequences_per_backbone = 8
+
+[gate3]
+# Interface. pae_interaction, Angstrom, from the bundled AF2 initial-guess
+# build. The ~10 bar is calibrated against ~1000 lab-tested designs for THAT
+# build; it does not transfer to another model or co-folding tool.
+pae_interaction_max = 10.0
+# The gate is not deterministic: roughly 1 in 10 repeats flips the verdict, and
+# a single design needs ~3 units of difference to be resolvable. So a verdict
+# needs replicates, and anything this close to the cut is reported as
+# borderline rather than as a pass or a fail.
+pae_borderline = 3.0
+# Minimum replicates before any gate-3 verdict is written at all.
+min_replicates = 3
+# Only a mean over ~9 replicates has a noise floor near 0.5.
+replicates_for_tight_floor = 9
+# The score saturates here, so it separates good from bad and cannot rank
+# among bad. Above this, report "saturated", not a number.
+pae_saturation = 31.75
+
+[ranking]
+# Grip: CA-CA contacts to the target. Never rank by confidence: plddt_binder
+# explains ~2.6% of fold-back variance pool-wide and inverts on 17 of 47
+# backbones, so picking a sequence by confidence is near a coin toss.
+grip_cutoff_angstrom = 8.0
+footprint_cutoff_angstrom = 10.0
+forbidden_sort_keys = [
+    "plddt",
+    "plddt_binder",
+    "plddt_total",
+    "pae",
+    "iptm",
+    "ptm",
+    "mpnn_score",
+    "confidence",
+]
+
+[chirality]
+# Signed volume of (N, C, CB) about CA: positive for L, negative for D.
+# Deliberately NOT the N-CA-C-CB improper dihedral, which swings continuously
+# and misled the original diagnosis. A D-residue is invisible to every other
+# check in this stack, so this one refuses rather than repairs.
+majority_warn_fraction = 0.5
+
+[structure]
+# A true peptide bond is ~3.8 A between consecutive CA atoms. Above this is a
+# real chain break and the contig must be split there; a jump in residue NUMBER
+# with the CAs still ~3.8 A apart is only numbering convention. Measure, never
+# assume.
+break_cutoff_angstrom = 4.5
+# Heavy-atom contact distance used to derive hotspots from a bound partner.
+contact_cutoff_angstrom = 5.0
+
+[statistics]
+# Pass-rate comparisons use Wilson intervals. At 50 designs per cell the ladder
+# resolves about three tiers and no finer, so two cells whose intervals overlap
+# are not ranked against each other at all.
+confidence_level = 0.95
+# Below this many items, a cell is reported as underpowered. Never as a null.
+underpowered_below = 30
+
+[cost]
+# Rented GPU has no walltime: a stalled job keeps billing. These are enforced by
+# the orchestrator, not by the user noticing.
+default_ceiling_usd = 50.0
+stall_minutes = 20
+max_hard_failure_retries = 3

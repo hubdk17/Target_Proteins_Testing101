@@ -27,6 +27,38 @@ ROOT = os.path.expanduser("~/rfd")
 GRIP_CUT = 8.0
 FOOT_CUT = 10.0
 
+# Hotspot coverage is measured from the binder CA to the NEAREST HEAVY ATOM of
+# the hotspot residue, not to the hotspot's CA. Same 8 A shell, re-anchored.
+# Why: a hotspot whose side chain projects toward the binder is engaged even
+# when its CA sits outside 8 A. Trp157 on IL-6 is the worked case -- 7.98 A
+# CA-CA on design_36_s3, a hair outside, while 14 binder heavy atoms sit within
+# 5 A of it in the predicted complex at a closest approach of 3.37 A. Deciding
+# coverage on CA-CA reported that design as missing the hotspot it engages.
+# The binder here is backbone-only glycine, so a heavy-atom/heavy-atom shell is
+# not computable on this file; this is the closest honest measure that is.
+HOT_CUT = 8.0
+
+
+def read_heavy(path, chain):
+    """{resnum: [(x,y,z), ...]} for non-hydrogen atoms of one chain."""
+    out = {}
+    with open(path) as fh:
+        for l in fh:
+            if l[:4] != "ATOM" or len(l) < 54:
+                continue
+            if l[21] != chain:
+                continue
+            name = l[12:16]
+            elem = l[76:78].strip() if len(l) >= 78 else ""
+            if elem == "H" or (not elem and name.strip()[:1] == "H"):
+                continue
+            try:
+                xyz = (float(l[30:38]), float(l[38:46]), float(l[46:54]))
+            except ValueError:
+                continue
+            out.setdefault(int(l[22:26]), []).append(xyz)
+    return out
+
 
 def read_cas(path):
     """Return {chain: [(resnum, (x,y,z)), ...]} for CA atoms."""
@@ -97,7 +129,6 @@ def measure(path, hotspots):
     target, binder = cas["A"], cas["B"]
     n = len(binder)
     grip = foot = 0
-    hot_hit = set()
     g2, f2 = GRIP_CUT ** 2, FOOT_CUT ** 2
     for bnum, bxyz in binder:
         for tnum, txyz in target:
@@ -106,14 +137,28 @@ def measure(path, hotspots):
                 foot += 1
                 if dd <= g2:
                     grip += 1
-                    if tnum in hotspots:
-                        hot_hit.add(tnum)
+
+    # Hotspot coverage is measured independently of the grip/footprint loop
+    # above. It used to be decided inside `if dd <= g2`, which made coverage a
+    # by-product of a CA-CA count and produced false misses.
+    heavy = read_heavy(path, "A")
+    hot_near = {}
+    for tnum in hotspots:
+        atoms = heavy.get(tnum)
+        if not atoms:
+            hot_near[tnum] = None          # hotspot absent from the file
+            continue
+        best = min(d2(bxyz, axyz) for _, bxyz in binder for axyz in atoms)
+        hot_near[tnum] = best ** 0.5
+    hot_hit = sorted(t for t, d in hot_near.items()
+                     if d is not None and d <= HOT_CUT)
     return {
         "n": n,
         "grip": grip,
         "foot": foot,
         "grip_per_res": grip / float(n) if n else 0.0,
-        "hot_hit": sorted(hot_hit),
+        "hot_hit": hot_hit,
+        "hot_near": hot_near,
     }
 
 
@@ -162,13 +207,28 @@ def main(argv):
         for r in rows:
             cov = ""
             if hotspots:
+                # Always print the measured distance, so a hotspot sitting just
+                # outside the shell is visible rather than silently a "miss".
+                near = r.get("hot_near", {})
+                detail = []
+                for h in hotspots:
+                    d = near.get(h)
+                    if d is None:
+                        detail.append("%d:absent" % h)
+                    else:
+                        detail.append("%d:%.2f%s" % (h, d,
+                                      "" if d <= HOT_CUT else "*"))
                 cov = "%d/%d  %s" % (len(r["hot_hit"]), len(hotspots),
-                                     ",".join(str(h) for h in r["hot_hit"]))
+                                     " ".join(detail))
             print("  %-26s %4d %5d %6d %6.3f  %s"
                   % (r["bb"], r["n"], r["nseq"], r["grip"], r["grip_per_res"], cov))
 
         best = rows[0]
         print("  -> best grip: %s (%.3f per residue)" % (best["bb"], best["grip_per_res"]))
+        if hotspots:
+            print("  coverage column: hotspot:distance in A from the nearest binder")
+            print("  CA to the nearest heavy atom of that residue; * = outside %.1f A."
+                  % HOT_CUT)
         if hotspots and not best["hot_hit"]:
             print("  *** the best-grip design touches NONE of the hotspots -- it is")
             print("      binding somewhere else on the target, which is not the aim")
