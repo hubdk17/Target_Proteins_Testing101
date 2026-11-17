@@ -212,11 +212,36 @@ def read_receptor(path, chain):
         if el == "H":
             continue
         atoms.append({"el": el, "name": ln[12:16].strip(),
+                      "resname": ln[17:20].strip(),
                       "resnum": int(ln[22:26]),
                       "xyz": (float(ln[30:38]), float(ln[38:46]),
                               float(ln[46:54])),
                       "r": VDW.get(el, 1.7)})
     return atoms
+
+
+def hbond_role(atom):
+    """Crude donor/acceptor type for a receptor polar atom.
+
+    Returns 'donor', 'acceptor', 'both' or None. Heavy-atom only, so this is
+    an approximation -- it does not know protonation or geometry, only atom
+    identity. Good enough to bias sequence choice toward complementarity.
+    """
+    el, name, rn = atom["el"], atom["name"], atom["resname"]
+    if el not in ("N", "O"):
+        return None
+    if name in ("N",):              # backbone amide N
+        return "donor"
+    if name in ("O", "OXT"):        # backbone carbonyl O
+        return "acceptor"
+    if el == "O":
+        if name in ("OG", "OG1", "OH"):   # Ser/Thr/Tyr hydroxyl
+            return "both"
+        return "acceptor"           # Asp/Glu/Asn/Gln carboxyl/amide O
+    if el == "N":
+        if rn == "HIS":
+            return "both"
+        return "donor"              # Lys/Arg/Trp/Asn/Gln N
 
 
 def read_pocket(path):
@@ -257,20 +282,61 @@ def burial_of(point, rec_xyz, rec_grid, radius=6.0):
                if d2f(point, rec_xyz[j]) < radius*radius)
 
 
-def design_sequence(helix, rec_xyz, rec_grid):
-    """Assign amino acids from burial alone. Returns seq, per-res report."""
+# binder residues that can DONATE an H-bond, and those that can ACCEPT,
+# ordered by side-chain reach so we can match the partner distance
+DONORS = ["S", "T", "N", "Q", "H", "K", "R"]
+ACCEPTORS = ["S", "T", "N", "Q", "D", "E"]
+
+
+def nearest_polar_partner(tip, rec, rec_grid, cut=4.0):
+    """Best receptor H-bond partner near `tip`. Returns (role, dist) or None.
+
+    role is what the RECEPTOR atom is, so the binder wants the complement.
+    """
+    best = None
+    for j in rec_grid.near(tip):
+        a = rec[j]
+        role = hbond_role(a)
+        if role is None:
+            continue
+        dd = d2f(tip, a["xyz"])
+        if dd <= cut*cut and (best is None or dd < best[1]):
+            best = (role, dd)
+    if best is None:
+        return None
+    return best[0], math.sqrt(best[1])
+
+
+def pick_polar(role, target_reach):
+    """Choose a complementary binder residue whose reach ~ target_reach."""
+    pool = ACCEPTORS if role == "donor" else (
+        DONORS if role == "acceptor" else DONORS + ACCEPTORS)
+    return min(pool, key=lambda aa: abs(REACH[aa] - target_reach))
+
+
+def design_sequence(helix, rec, rec_xyz, rec_grid, hbond=True):
+    """Assign amino acids from burial, with optional polar complementarity.
+
+    Burial still decides the hydrophobic core. The new step: at a position
+    that is only partly buried (the rim, where a side chain can reach a
+    receptor polar atom and still see solvent), prefer a residue that makes
+    an H-bond to that atom instead of a bare charge. Deeply buried apolar
+    subpockets stay hydrophobic -- burying a lone polar there is the
+    unsatisfied-polar penalty we test for, not a feature.
+    """
     seq = []
     report = []
     for i, r in enumerate(helix):
         cbdir = unit(vsub(r["CB"], r["CA"]))
-        # burial sampled where the side-chain tip would reach
         probe_close = vadd(r["CB"], vscale(cbdir, 1.5))
         probe_far = vadd(r["CB"], vscale(cbdir, 3.5))
         b_close = burial_of(probe_close, rec_xyz, rec_grid, 5.0)
         b_far = burial_of(probe_far, rec_xyz, rec_grid, 5.0)
-        buried = (b_close + b_far)
+        buried = b_close + b_far
+        partner = (nearest_polar_partner(probe_far, rec, rec_grid, 4.5)
+                   if hbond else None)
         if buried >= 8:
-            # pick the largest hydrophobic that fits without clashing
+            # deep apolar core: fill with the largest hydrophobic that fits
             choice = "A"
             for aa in HYDRO_BY_SIZE:
                 tip = vadd(r["CB"], vscale(cbdir, REACH[aa]))
@@ -281,6 +347,11 @@ def design_sequence(helix, rec_xyz, rec_grid):
                 else:
                     break
             label = "buried"
+        elif partner is not None and buried >= 2:
+            # rim with a reachable receptor polar atom: make the H-bond
+            role, dist = partner
+            choice = pick_polar(role, dist)
+            label = "hbond"
         elif buried >= 4:
             choice = "L" if b_close >= 3 else "T"
             label = "rim"
@@ -307,11 +378,12 @@ def write_complex(path, rec_path, chain, helix, seq, binder_chain="B",
         for name, p in atoms:
             serial += 1
             el = name[0]
+            nm = name if len(name) >= 4 else (" " + name).ljust(4)
             out.append(
-                "ATOM  %5d  %-3s %3s %s%4d    %8.3f%8.3f%8.3f  1.00  0.00"
+                "ATOM  %5d %4s %3s %s%4d    %8.3f%8.3f%8.3f  1.00  0.00"
                 "          %2s\n"
-                % (serial, name, rn, binder_chain, start+i,
-                   p[0], p[1], p[2], el))
+                % (serial, nm, rn, binder_chain, start+i,
+                   p[0], p[1], p[2], el.rjust(2)))
     out.append("END\n")
     with open(path, "w") as fh:
         fh.writelines(out)
@@ -326,6 +398,9 @@ def main(argv=None):
     ap.add_argument("--n-designs", type=int, default=5)
     ap.add_argument("--orientations", type=int, default=600)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--no-hbond", action="store_true",
+                    help="disable the polar-complementarity term (burial "
+                         "only, the v1 behaviour)")
     ap.add_argument("--out-prefix", default="design")
     args = ap.parse_args(argv)
 
@@ -374,7 +449,8 @@ def main(argv=None):
     for cb_in, placed in poses:
         if made >= args.n_designs:
             break
-        seq, report = design_sequence(placed, rec_xyz, rec_grid)
+        seq, report = design_sequence(placed, rec, rec_xyz, rec_grid,
+                                      hbond=not args.no_hbond)
         if seq in seen_seq:
             continue
         seen_seq.add(seq)
