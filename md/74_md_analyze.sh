@@ -7,9 +7,7 @@
 #     --container-mounts=/home/dakshcsed:/workspace \
 #     bash /workspace/rfd/scripts/md/74_md_analyze.sh
 set -uo pipefail
-export AMBERHOME=/workspace/amber24
-source "$AMBERHOME/amber.sh"
-export LD_LIBRARY_PATH=/workspace/usr/lib:/workspace/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
+source /workspace/rfd/scripts/md/_amber_env.sh
 cd /workspace/rfd/scripts
 
 summ () {  # summarise a cpptraj 2-col .dat: first, last, mean of last 20%

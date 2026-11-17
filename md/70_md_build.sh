@@ -7,8 +7,7 @@
 # gate is blind to.
 set -euo pipefail
 PDB="$1"; OUT="$2"; mkdir -p "$OUT"
-export AMBERHOME=/workspace/amber24
-source "$AMBERHOME/amber.sh"
+source /workspace/rfd/scripts/md/_amber_env.sh
 # clean: add TER between chains, strip waters/alt locs, standardise
 pdb4amber -i "$PDB" -o "$OUT/clean.pdb" --nohyd --dry
 cat > "$OUT/build.in" <<TLEAP

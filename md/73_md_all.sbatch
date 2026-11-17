@@ -14,9 +14,7 @@ IMG=/home/hpc_apps/nvidia+nvhpc+25.3-devel-cuda_multi-ubuntu22.04.sqsh
 srun --container-image=$IMG --container-mounts=/home/dakshcsed:/workspace \
   bash -c '
     set -euo pipefail
-    export AMBERHOME=/workspace/amber24
-    source "$AMBERHOME/amber.sh"
-    export LD_LIBRARY_PATH=/workspace/usr/lib:/workspace/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
+    source /workspace/rfd/scripts/md/_amber_env.sh
     cd /workspace/rfd/scripts
     bash md/70_md_build.sh "/workspace/rfd/scripts/'"$PDB"'" "/workspace/rfd/scripts/'"$OUT"'"
     cd "/workspace/rfd/scripts/'"$OUT"'"
