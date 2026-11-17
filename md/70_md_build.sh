@@ -27,7 +27,9 @@ tleap -f "$OUT/build.in" | tee "$OUT/tleap.log"
 echo "=== chirality check on built system (must report 0 D-residues) ==="
 # self-contained: N-C-CA-CB improper ~ -122 deg for L, positive for D
 # (calibrated on 1YCR: 94/94 L-residues at -122.3 +/- 3.0 deg)
-python3 - "$OUT/sys_built.pdb" <<'PYEOF'
+# `if ! ...; then exit 1` so the gate genuinely aborts the job (a swallowed
+# check is exactly the "check that cannot fail" trap we keep hitting).
+if ! python3 - "$OUT/sys_built.pdb" <<'PYEOF'
 import sys, math
 res={}
 for ln in open(sys.argv[1]):
@@ -51,4 +53,9 @@ for k,(rn,a) in res.items():
 print("chiral residues checked:",n," D-residues:",nd, (" "+",".join(bad[:10]) if bad else ""))
 sys.exit(1 if nd else 0)
 PYEOF
-if [ $? -ne 0 ]; then echo "D-RESIDUES FOUND -- do NOT run MD until fixed"; fi
+then
+  :
+else
+  echo "D-RESIDUES FOUND in built system -- aborting before MD"
+  exit 1
+fi
