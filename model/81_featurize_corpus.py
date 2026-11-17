@@ -57,6 +57,33 @@ CHARGED_POS = gb.CHARGED_POS
 CHARGED_NEG = gb.CHARGED_NEG
 THREE2ONE = gb.THREE_TO_ONE
 
+# Kyte-Doolittle hydropathy, for "how greasy is the partner neighbourhood this
+# position sits in" -- a PARTNER-residue property, so it never leaks the label.
+KD = {"ALA": 1.8, "ARG": -4.5, "ASN": -3.5, "ASP": -3.5, "CYS": 2.5,
+      "GLN": -3.5, "GLU": -3.5, "GLY": -0.4, "HIS": -3.2, "ILE": 4.5,
+      "LEU": 3.8, "LYS": -3.9, "MET": 1.9, "PHE": 2.8, "PRO": -1.6,
+      "SER": -0.8, "THR": -0.7, "TRP": -0.9, "TYR": -1.3, "VAL": 4.2}
+
+
+def _sub(a, b):
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _unit(v):
+    n = math.sqrt(_dot(v, v))
+    return (v[0] / n, v[1] / n, v[2] / n) if n > 1e-6 else (0.0, 0.0, 0.0)
+
+
+def _coord(ratoms, name):
+    for a in ratoms:
+        if a.name == name:
+            return a.xyz
+    return None
+
 
 def partner_role(atom):
     """donor / acceptor / both / None for a partner polar atom (heavy-atom)."""
@@ -178,6 +205,64 @@ def featurize_structure(path, n_points, contact_cut=5.0, hb_cut=4.5):
                             if role in ("acceptor", "both"):
                                 acc += 1
                     ncontact += 1
+
+            # -- ENRICHED, ENVIRONMENT-ONLY FEATURES (never use this residue's
+            #    own side-chain identity, so no label leak) -------------------
+            # (a) distance-weighted partner chemistry: a close donor should
+            #     count for more than one 4.4 A away. The flat counts above
+            #     threw that away, which is likely why the H-bond/polar signal
+            #     was weak in the linear model.
+            # (b) directional: project partner chemistry into the cone the SIDE
+            #     CHAIN points down (the CA->CB vector, backbone-determined, so
+            #     identity-free) -- "what chemistry will the side chain face".
+            # (c) local Kyte-Doolittle: how greasy the partner residues are.
+            ca = _coord(ratoms, "CA")
+            cb = _coord(ratoms, "CB")
+            dirv = _unit(_sub(cb, ca)) if (ca and cb) else None
+            w_apol = w_don = w_acc = w_pos = w_neg = 0.0
+            cb_apol = cb_pol = cb_pos = cb_neg = 0.0
+            kd_sum = 0.0
+            seen_res = set()
+            anchor = cb or ca
+            reach2 = 8.0 * 8.0
+            if anchor is not None:
+                for k in pgrid.near(anchor):
+                    b = partner[k]
+                    d2 = gb.dist2(anchor, b.xyz)
+                    if d2 > reach2:
+                        continue
+                    wt = 1.0 / (1.0 + d2)              # closer -> larger
+                    role = partner_role(b)
+                    is_pos = (b.resname, b.name) in CHARGED_POS
+                    is_neg = (b.resname, b.name) in CHARGED_NEG
+                    if gb.is_apolar(b):
+                        w_apol += wt
+                    if role in ("donor", "both"):
+                        w_don += wt
+                    if role in ("acceptor", "both"):
+                        w_acc += wt
+                    if is_pos:
+                        w_pos += wt
+                    if is_neg:
+                        w_neg += wt
+                    if dirv is not None:
+                        cos = _dot(dirv, _unit(_sub(b.xyz, ca)))
+                        if cos > 0.3:                  # ~72 deg cone toward CB
+                            cw = cos * wt
+                            if gb.is_apolar(b):
+                                cb_apol += cw
+                            if role in ("donor", "acceptor", "both"):
+                                cb_pol += cw
+                            if is_pos:
+                                cb_pos += cw
+                            if is_neg:
+                                cb_neg += cw
+                    rk = (b.chain, b.resnum)
+                    if rk not in seen_res:
+                        seen_res.add(rk)
+                        kd_sum += KD.get(b.resname, 0.0)
+            partner_kd = kd_sum / len(seen_res) if seen_res else 0.0
+
             rows.append({
                 "structure": os.path.basename(path),
                 "chain": key[0], "resnum": key[1],
@@ -187,6 +272,12 @@ def featurize_structure(path, n_points, contact_cut=5.0, hb_cut=4.5):
                 "partner_donor": don, "partner_acceptor": acc,
                 "partner_pos": pos, "partner_neg": neg,
                 "n_partner_contacts": ncontact,
+                "w_apolar": round(w_apol, 4), "w_donor": round(w_don, 4),
+                "w_acceptor": round(w_acc, 4), "w_pos": round(w_pos, 4),
+                "w_neg": round(w_neg, 4),
+                "cb_apolar": round(cb_apol, 4), "cb_polar": round(cb_pol, 4),
+                "cb_pos": round(cb_pos, 4), "cb_neg": round(cb_neg, 4),
+                "partner_kd": round(partner_kd, 3),
             })
     return rows
 
@@ -194,7 +285,10 @@ def featurize_structure(path, n_points, contact_cut=5.0, hb_cut=4.5):
 COLS = ["structure", "chain", "resnum", "resname", "aa",
         "buried_apolar", "buried_polar", "partner_apolar",
         "partner_donor", "partner_acceptor", "partner_pos", "partner_neg",
-        "n_partner_contacts"]
+        "n_partner_contacts",
+        # enriched, environment-only columns (added 2026-11-17)
+        "w_apolar", "w_donor", "w_acceptor", "w_pos", "w_neg",
+        "cb_apolar", "cb_polar", "cb_pos", "cb_neg", "partner_kd"]
 
 
 def main(argv=None):
