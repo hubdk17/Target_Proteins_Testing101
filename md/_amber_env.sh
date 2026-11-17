@@ -7,7 +7,12 @@ done
 if [ -z "${AMBERHOME:-}" ] || [ ! -f "$AMBERHOME/amber.sh" ]; then
   echo "ERROR: cannot find amber.sh (looked under /workspace/amber/amber24, /workspace/amber24)"; exit 1
 fi
+# amber.sh references unset vars (PERL5LIB, ...). Our callers run `set -u`,
+# which turns those into fatal errors, so disable nounset across the source
+# and restore it (all callers here use set -u).
+set +u
 source "$AMBERHOME/amber.sh"
+set -u
 for u in /workspace/amber/usr /workspace/usr "$(dirname "$AMBERHOME")/usr"; do
   if [ -d "$u/lib" ]; then
     export LD_LIBRARY_PATH="$u/lib:$u/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"; break
