@@ -137,29 +137,45 @@ def chains_from_pdb(text):
     return {c: "".join(v) for c, v in seq.items()}
 
 
-def rcsb_search(n, max_res):
-    q = {
-        "query": {"type": "group", "logical_operator": "and", "nodes": [
-            {"type": "terminal", "service": "text", "parameters": {
-                "attribute": "rcsb_entry_info.polymer_entity_count_protein",
-                "operator": "greater_or_equal", "value": 2}},
-            {"type": "terminal", "service": "text", "parameters": {
-                "attribute": "rcsb_entry_info.resolution_combined",
-                "operator": "less_or_equal", "value": max_res}},
-        ]},
-        "return_type": "entry",
-        "request_options": {
-            "paginate": {"start": 0, "rows": n},
-            "results_content_type": ["experimental"],
-            "sort": [{"sort_by": "score", "direction": "desc"}]},
-    }
-    data = json.dumps(q).encode()
-    req = urllib.request.Request(
-        SEARCH_URL, data=data,
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        res = json.loads(r.read().decode())
-    return [row["identifier"] for row in res.get("result_set", [])]
+def rcsb_search(n, max_res, page=10000):
+    """Return up to n PDB ids. RCSB caps a single request at 10,000 rows and
+    returns HTTP 400 above that, so page through the result set when n is larger.
+    """
+    def _query(start, rows):
+        return {
+            "query": {"type": "group", "logical_operator": "and", "nodes": [
+                {"type": "terminal", "service": "text", "parameters": {
+                    "attribute": "rcsb_entry_info.polymer_entity_count_protein",
+                    "operator": "greater_or_equal", "value": 2}},
+                {"type": "terminal", "service": "text", "parameters": {
+                    "attribute": "rcsb_entry_info.resolution_combined",
+                    "operator": "less_or_equal", "value": max_res}},
+            ]},
+            "return_type": "entry",
+            "request_options": {
+                "paginate": {"start": start, "rows": rows},
+                "results_content_type": ["experimental"],
+                "sort": [{"sort_by": "score", "direction": "desc"}]},
+        }
+
+    ids, start = [], 0
+    while len(ids) < n:
+        rows = min(page, n - len(ids))
+        data = json.dumps(_query(start, rows)).encode()
+        req = urllib.request.Request(
+            SEARCH_URL, data=data,
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            res = json.loads(r.read().decode())
+        batch = [row["identifier"] for row in res.get("result_set", [])]
+        if not batch:
+            break                       # ran out of matching entries
+        ids.extend(batch)
+        print("  search: %d ids so far" % len(ids))
+        start += len(batch)
+        if len(batch) < rows:
+            break                       # last (partial) page
+    return ids[:n]
 
 
 def fetch(pdb_id, tries=3):
