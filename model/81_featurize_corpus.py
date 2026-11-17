@@ -39,11 +39,18 @@ import sys
 
 # -- load the validated gate-battery code by path (its name starts with a digit,
 #    so it cannot be imported normally) ---------------------------------------
-_GB = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                   "..", "60_gate_battery.py")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_GB = os.path.join(_HERE, "..", "60_gate_battery.py")
 _spec = importlib.util.spec_from_file_location("gate_battery", _GB)
 gb = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gb)
+
+# the holdout guard from the fetcher, reused so the leak-check uses the exact
+# same test that was supposed to keep MDM2/MDMX/p53 out in the first place
+_FC = os.path.join(_HERE, "80_fetch_corpus.py")
+_spec2 = importlib.util.spec_from_file_location("fetch_corpus", _FC)
+fc = importlib.util.module_from_spec(_spec2)
+_spec2.loader.exec_module(fc)
 
 POLAR = gb.POLAR_ELEMENTS
 CHARGED_POS = gb.CHARGED_POS
@@ -195,6 +202,8 @@ def main(argv=None):
     ap.add_argument("raw", help="corpus raw/ directory of .pdb files")
     ap.add_argument("--out", required=True)
     ap.add_argument("--sasa-points", type=int, default=96)
+    ap.add_argument("--mdm2-cut", type=float, default=0.30)
+    ap.add_argument("--p53-cut", type=float, default=0.60)
     ap.add_argument("--shard", default="1/1",
                     help="i/N to process only the i-th of N chunks "
                          "(for a Slurm array); 1-indexed")
@@ -206,6 +215,23 @@ def main(argv=None):
     files = sorted(glob.glob(os.path.join(args.raw, "*.pdb")))
     i, n = (int(x) for x in args.shard.split("/"))
     files = files[(i - 1)::n]
+
+    # LEAK-CHECK: re-run the holdout guard over every file we are about to
+    # featurize. held_out=0 at fetch time only means nothing matched THEN;
+    # this verifies what actually ARRIVED in raw/. If anything matches MDM2/
+    # MDMX/p53 we abort rather than quietly train on the answer.
+    leaks = []
+    for p in files:
+        cseq = fc.chains_from_pdb(open(p).read())
+        hold, why = fc.is_holdout(cseq, args.mdm2_cut, args.p53_cut)
+        if hold:
+            leaks.append("%s (%s)" % (os.path.basename(p), why))
+    if leaks:
+        sys.stderr.write("LEAK: %d held-out structures found in raw/:\n  %s\n"
+                         % (len(leaks), "\n  ".join(leaks[:10])))
+        raise SystemExit("aborting -- remove these from the corpus first.")
+    print("leak-check: 0 of %d structures match MDM2/MDMX/p53 -- corpus clean"
+          % len(files))
     print("featurizing %d structures (shard %s), SASA points=%d"
           % (len(files), args.shard, args.sasa_points))
 
