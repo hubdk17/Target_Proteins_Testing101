@@ -17,7 +17,10 @@ summ () {  # summarise a cpptraj 2-col .dat: first, last, mean of last 20%
             printf "first=%.2f  last=%.2f  mean_last20%%=%.2f  (frames=%d)\n", v[1], v[n], s/k, n }' "$1"
 }
 
-for arm in armA armB ref; do
+# arm dirs: pass names as args (they map to runs/<name>); default to the
+# original three. e.g.  bash md/74_md_analyze.sh armA armB ref design_01 L15_03
+ARMS="${@:-armA armB ref}"
+for arm in $ARMS; do
   D=runs/$arm
   echo "===================== $arm ====================="
   if [ ! -f "$D/prod.nc" ]; then
