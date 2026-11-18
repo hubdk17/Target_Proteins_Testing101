@@ -287,6 +287,9 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--save", default=None)
     ap.add_argument("--cpu", action="store_true")
+    ap.add_argument("--keep-list", default=None,
+                    help="file of structure basenames (from 90 --emit-keep) to "
+                         "restrict to -- removes exact-duplicate redundancy")
     args = ap.parse_args(argv)
 
     feats = BASE_FEATS + (ENRICHED_FEATS if args.enriched else [])
@@ -299,6 +302,12 @@ def main(argv=None):
     groups = load_groups(args.table, feats)
     print("loaded %d interfaces (one per structure+chain) from %d structures"
           % (len(groups), len(set(g[0] for g in groups))))
+
+    if args.keep_list:
+        keep = set(l.strip() for l in open(args.keep_list) if l.strip())
+        groups = [g for g in groups if g[0] in keep]
+        print("keep-list: %d interfaces from %d structures survive de-dup"
+              % (len(groups), len(set(g[0] for g in groups))))
 
     # split BY STRUCTURE
     structs = sorted(set(g[0] for g in groups))

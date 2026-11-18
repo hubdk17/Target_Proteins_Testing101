@@ -51,6 +51,10 @@ def main(argv=None):
     ap.add_argument("raw", help="corpus raw/ directory of .pdb files")
     ap.add_argument("--min-len", type=int, default=10,
                     help="ignore chains shorter than this")
+    ap.add_argument("--emit-keep", default=None,
+                    help="write one representative structure per unique "
+                         "longest-chain sequence (a non-redundant keep-list for "
+                         "86's --keep-list). Removes EXACT duplicates.")
     args = ap.parse_args(argv)
 
     files = sorted(glob.glob(os.path.join(args.raw, "*.pdb")))
@@ -86,6 +90,16 @@ def main(argv=None):
     print("\nbiggest exact-duplicate groups (copies : one example):")
     for v in dup_groups[:10]:
         print("  %4d copies   e.g. %s" % (len(v), v[0]))
+
+    if args.emit_keep:
+        # one representative per unique sequence = the exact-dedup keep set
+        reps = sorted(v[0] for v in by_seq.values())
+        with open(args.emit_keep, "w") as fh:
+            fh.write("\n".join(reps) + "\n")
+        print("\nemitted %d non-redundant representatives -> %s"
+              % (len(reps), args.emit_keep))
+        print("(feed to 86 with --keep-list to train/eval on unique sequences; "
+              "collapses by LONGEST chain, so it is conservative.)")
 
     print("\nRead: 'EXPOSED %' is the share of the corpus that has an identical "
           "twin elsewhere; under a random by-structure split most of those twins "
