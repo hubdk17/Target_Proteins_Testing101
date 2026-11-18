@@ -39,6 +39,12 @@ echo "training table: $TSV ($(wc -l < "$TSV") rows)"
 
 IMAGE=/home/hpc_apps/nvidia+pytorch+25.04-py3.sqsh
 SAVE=/workspace/rfd/corpus_v2/flow_sphere_enriched.pt
+KEEP=/workspace/rfd/corpus_v2/keep_unique.txt
+
+# Train on UNIQUE sequences only, so the big-data recovery is not inflated by
+# duplicate chains straddling train/test (same integrity fix as corpus_v1).
+test -s "$HOME/rfd/corpus_v2/keep_unique.txt" || {
+  echo "keep_unique.txt missing - run 90 --emit-keep on corpus_v2/raw first"; exit 1; }
 
 echo "node: $(hostname)  job: $SLURM_JOB_ID"
 srun --container-image="$IMAGE" \
@@ -49,7 +55,8 @@ set -euo pipefail
 nvidia-smi --query-gpu=name --format=csv,noheader
 python /workspace/rfd/scripts/model/86_flow_model.py \
   /workspace/rfd/corpus_v2/interface_features.tsv \
-  --geometry sphere --enriched --epochs 150 --d-model 128 --layers 3 \
+  --geometry sphere --enriched --keep-list "'"$KEEP"'" \
+  --epochs 150 --d-model 128 --layers 3 \
   --save "'"$SAVE"'"
 echo "=== done ==="
 test -f "'"$SAVE"'" && echo "model written: '"$SAVE"'"
