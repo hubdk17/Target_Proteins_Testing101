@@ -32,7 +32,6 @@
 
 IMAGE=/home/hpc_apps/nvidia+pytorch+25.04-py3.sqsh
 TABLE=/workspace/rfd/corpus_v1/interface_features.tsv
-SAVE=/workspace/rfd/corpus_v1/flow_seq_model.pt
 
 test -s "$HOME/rfd/corpus_v1/interface_features.tsv" || {
   echo "interface_features.tsv missing - run 81_featurize_corpus.py first"; exit 1; }
@@ -45,9 +44,13 @@ srun --container-image="$IMAGE" \
      bash -lc '
 set -euo pipefail
 nvidia-smi --query-gpu=name --format=csv,noheader
-python /workspace/rfd/scripts/model/86_flow_model.py \
-  "'"$TABLE"'" --epochs 120 --d-model 128 --layers 3 \
-  --save "'"$SAVE"'"
+M=/workspace/rfd/scripts/model/86_flow_model.py
+T="'"$TABLE"'"
+echo ">>>>>>>>> EUCLIDEAN flow (baseline) <<<<<<<<<"
+python "$M" "$T" --epochs 120 --d-model 128 --layers 3 --geometry euclid \
+  --save /workspace/rfd/corpus_v1/flow_euclid.pt
+echo ">>>>>>>>> RIEMANNIAN flow (sphere / geodesic) <<<<<<<<<"
+python "$M" "$T" --epochs 120 --d-model 128 --layers 3 --geometry sphere \
+  --save /workspace/rfd/corpus_v1/flow_sphere.pt
 echo "=== done ==="
-test -f "'"$SAVE"'" && echo "model written: '"$SAVE"'"
 '

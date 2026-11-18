@@ -128,6 +128,31 @@ def dirichlet_uniform(shape, dev):
     return g / g.sum(-1, keepdim=True)
 
 
+# --- Riemannian geometry on the probability simplex -----------------------
+# The simplex with the Fisher-Rao metric is isometric to the positive orthant
+# of the unit sphere under the square-root map  p -> sqrt(p)  (sum p = 1 becomes
+# sum u^2 = 1). Flow matching there follows great-circle GEODESICS instead of
+# straight Euclidean chords, so the path never leaves the simplex and respects
+# its curvature. A one-hot maps to itself (sqrt(1)=1), so data sits on the sphere
+# already. This is the standard Riemannian / Dirichlet flow-matching construction.
+
+def to_sphere(p):
+    return torch.sqrt(p.clamp_min(0.0))
+
+
+def slerp(u0, u1, t):
+    """Great-circle interpolation between unit vectors u0,u1 (nonneg octant)."""
+    dot = (u0 * u1).sum(-1, keepdim=True).clamp(-1 + 1e-7, 1 - 1e-7)
+    th = torch.arccos(dot)
+    s = torch.sin(th)
+    w0 = torch.sin((1 - t) * th) / s
+    w1 = torch.sin(t * th) / s
+    u = w0 * u0 + w1 * u1
+    lin = (1 - t) * u0 + t * u1          # fallback where the angle is tiny
+    u = torch.where(s < 1e-4, lin, u)
+    return u / u.norm(dim=-1, keepdim=True).clamp_min(1e-9)
+
+
 class FlowNet(nn.Module):
     def __init__(self, d_feat, n_aa=20, d=128, layers=3, heads=4, drop=0.1):
         super().__init__()
@@ -159,10 +184,15 @@ def train(net, groups, tr_idx, mu, sd, args, dev, class_w):
             idx = order[i:i + args.batch]
             C, Y, M = batch_pad(groups, idx, dev)
             C = (C - mu) / sd
-            x1 = torch.eye(n_aa, device=dev)[Y]          # B,L,20
-            x0 = dirichlet_uniform(x1.shape, dev)
+            x1 = torch.eye(n_aa, device=dev)[Y]          # B,L,20 (one-hot)
             t = torch.rand(C.size(0), 1, 1, device=dev)
-            xt = (1 - t) * x0 + t * x1
+            if args.geometry == "sphere":
+                u0 = to_sphere(dirichlet_uniform(x1.shape, dev))
+                ut = slerp(u0, x1, t)                     # geodesic on the sphere
+                xt = ut ** 2                              # back to the simplex
+            else:
+                x0 = dirichlet_uniform(x1.shape, dev)
+                xt = (1 - t) * x0 + t * x1                # Euclidean chord
             logits = net(xt, C, t, M)
             loss = lossf(logits[M], Y[M])
             opt.zero_grad()
@@ -185,14 +215,24 @@ def sample_recovery(net, groups, te_idx, mu, sd, args, dev, steps=50):
         idx = te_idx[i:i + args.batch]
         C, Y, M = batch_pad(groups, idx, dev)
         Cn = (C - mu) / sd
-        xt = dirichlet_uniform((C.size(0), C.size(1), n_aa), dev)
-        for s in range(steps):
-            t = torch.full((C.size(0), 1, 1), s / steps, device=dev)
-            logits = net(xt, Cn, t, M)
-            p1 = torch.softmax(logits, -1)
-            dt = 1.0 / steps
-            xt = xt + dt * (p1 - xt) / max(1e-3, 1 - s / steps)
-        pred = xt.argmax(-1)
+        if args.geometry == "sphere":
+            u = to_sphere(dirichlet_uniform((C.size(0), C.size(1), n_aa), dev))
+            for s in range(steps):
+                t = torch.full((C.size(0), 1, 1), s / steps, device=dev)
+                logits = net(u ** 2, Cn, t, M)
+                u1 = to_sphere(torch.softmax(logits, -1))   # predicted clean pt
+                alpha = min(1.0, (1.0 / steps) / max(1e-3, 1 - s / steps))
+                u = slerp(u, u1, alpha)                      # geodesic step
+            pred = (u ** 2).argmax(-1)
+        else:
+            xt = dirichlet_uniform((C.size(0), C.size(1), n_aa), dev)
+            for s in range(steps):
+                t = torch.full((C.size(0), 1, 1), s / steps, device=dev)
+                logits = net(xt, Cn, t, M)
+                p1 = torch.softmax(logits, -1)
+                dt = 1.0 / steps
+                xt = xt + dt * (p1 - xt) / max(1e-3, 1 - s / steps)
+            pred = xt.argmax(-1)
         all_true.append(Y[M].cpu().numpy())
         all_pred.append(pred[M].cpu().numpy())
     return np.concatenate(all_true), np.concatenate(all_pred)
@@ -232,6 +272,9 @@ def main(argv=None):
     ap.add_argument("table")
     ap.add_argument("--enriched", action="store_true",
                     help="use 81's distance-weighted/directional columns too")
+    ap.add_argument("--geometry", choices=["euclid", "sphere"], default="euclid",
+                    help="sphere = Riemannian flow on the simplex (sqrt map, "
+                         "geodesic/slerp paths); euclid = linear chord")
     ap.add_argument("--d-model", type=int, default=128)
     ap.add_argument("--layers", type=int, default=3)
     ap.add_argument("--heads", type=int, default=4)
@@ -249,8 +292,9 @@ def main(argv=None):
     feats = BASE_FEATS + (ENRICHED_FEATS if args.enriched else [])
     dev = torch.device("cpu" if args.cpu or not torch.cuda.is_available()
                        else "cuda")
-    print("torch %s  device %s  features(%d): %s"
-          % (torch.__version__, dev, len(feats), ", ".join(feats)))
+    print("torch %s  device %s  geometry=%s  features(%d): %s"
+          % (torch.__version__, dev, args.geometry, len(feats),
+             ", ".join(feats)))
 
     groups = load_groups(args.table, feats)
     print("loaded %d interfaces (one per structure+chain) from %d structures"
