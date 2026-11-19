@@ -45,6 +45,7 @@ echo "=== training ==="
 python /workspace/rfd/scripts/model/96_flow_backbone.py \
   --data "'"$DATA"'" --epochs 300 --batch 16 \
   --d-model 128 --layers 4 --lr 3e-4 --log-every 10 \
+  --w-dist 2.0 \
   --save "'"$SAVE"'"
 echo "=== done ==="
 test -f "'"$SAVE"'" && echo "checkpoint written: '"$SAVE"'"
