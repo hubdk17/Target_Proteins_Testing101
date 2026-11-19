@@ -194,7 +194,7 @@ def make_batch(chains, idx, device):
 
 # =========================== train / loss ==================================
 
-def flow_loss(net, x1, R1, mask, w_rot):
+def flow_loss(net, x1, R1, mask, w_rot, w_dist=1.0):
     B, L, _ = x1.shape
     t = torch.rand(B, device=x1.device)
     tx = t[:, None, None]
@@ -208,7 +208,17 @@ def flow_loss(net, x1, R1, mask, w_rot):
     denom = mask.sum().clamp_min(1.0)
     lt = (((px1 - x1) * m) ** 2).sum() / (denom * 3)
     lr = (((pR1 - R1) * m[..., None]) ** 2).sum() / (denom * 9)
-    return lt + w_rot * lr, lt.item(), lr.item()
+    # auxiliary chain-connectivity loss: match the CONSECUTIVE-CA distance of the
+    # prediction to the data. Without this, the plain x1-MSE underfits the one
+    # thing a valid backbone needs most -- neighbouring residues ~3.8 A apart --
+    # and the sampler produces loose residue clouds (measured C-N ~20 A).
+    ld = px1.new_zeros(())
+    if w_dist > 0 and L > 1:
+        dp = torch.linalg.norm(px1[:, 1:] - px1[:, :-1], dim=-1)   # (B,L-1)
+        dt = torch.linalg.norm(x1[:, 1:] - x1[:, :-1], dim=-1)
+        nm = mask[:, 1:] * mask[:, :-1]
+        ld = (((dp - dt) * nm) ** 2).sum() / nm.sum().clamp_min(1.0)
+    return lt + w_rot * lr + w_dist * ld, lt.item(), lr.item(), float(ld)
 
 
 @torch.no_grad()
@@ -239,18 +249,18 @@ def train(args):
     n = len(chains)
     for ep in range(args.epochs):
         perm = torch.randperm(n).tolist()
-        tot = tt = tr = 0.0; nb = 0
+        tot = tt = tr = td = 0.0; nb = 0
         for s in range(0, n, args.batch):
             idx = perm[s:s + args.batch]
             x1, R1, mask = make_batch(chains, idx, dev)
-            loss, lt, lr = flow_loss(net, x1, R1, mask, args.w_rot)
+            loss, lt, lr, ld = flow_loss(net, x1, R1, mask, args.w_rot, args.w_dist)
             opt.zero_grad(); loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
             opt.step()
-            tot += loss.item(); tt += lt; tr += lr; nb += 1
+            tot += loss.item(); tt += lt; tr += lr; td += ld; nb += 1
         if ep % args.log_every == 0 or ep == args.epochs - 1:
-            print("epoch %4d  loss %.4f  trans %.4f  rot %.4f"
-                  % (ep, tot / nb, tt / nb, tr / nb))
+            print("epoch %4d  loss %.4f  trans %.4f  rot %.4f  dist %.4f"
+                  % (ep, tot / nb, tt / nb, tr / nb, td / nb))
     if args.save:
         torch.save({"state": net.state_dict(), "d_model": args.d_model,
                     "layers": args.layers, "scale": SCALE}, args.save)
@@ -278,7 +288,7 @@ def smoke():
     for step in range(30):
         idx = list(range(len(chains)))
         x1, R1, mask = make_batch(chains, idx, dev)
-        loss, lt, lr = flow_loss(net, x1, R1, mask, 1.0)
+        loss, lt, lr, ld = flow_loss(net, x1, R1, mask, 1.0, 1.0)
         opt.zero_grad(); loss.backward(); opt.step()
         if step == 0: first = loss.item()
         last = loss.item()
@@ -308,6 +318,8 @@ def main(argv=None):
     ap.add_argument("--epochs", type=int, default=200)
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--w-rot", type=float, default=1.0)
+    ap.add_argument("--w-dist", type=float, default=1.0,
+                    help="weight on the consecutive-CA distance (chain) loss")
     ap.add_argument("--log-every", type=int, default=10)
     ap.add_argument("--save", default=None)
     args = ap.parse_args(argv)
