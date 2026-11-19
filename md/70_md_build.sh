@@ -58,3 +58,41 @@ else
   echo "D-RESIDUES FOUND in built system -- aborting before MD"
   exit 1
 fi
+
+echo "=== chain-separation check (the two chains must NOT be fused) ==="
+# ref_p53.pdb and the design complexes carry no TER record between chain A and
+# chain B. pdb4amber normally inserts one, but if it does not, tleap happily
+# makes a peptide bond from the last target residue to the first binder
+# residue -- a single covalent chain that can never come apart. Every
+# downstream read (binder RMSD, interface contacts) would still look sane,
+# so this is gated explicitly rather than assumed.
+if ! python3 - "$OUT/sys_built.pdb" <<'PYEOF'
+import sys, math
+# ordered protein residues: (chain, resseq) -> {atom: xyz}
+order=[]; res={}
+skip={"WAT","HOH","Na+","Cl-","NA","CL"}
+for ln in open(sys.argv[1]):
+    if not ln.startswith("ATOM"): continue
+    rn=ln[17:20].strip()
+    if rn in skip: continue
+    k=(ln[21], int(ln[22:26]))
+    if k not in res: res[k]={}; order.append(k)
+    res[k][ln[12:16].strip()]=(float(ln[30:38]),float(ln[38:46]),float(ln[46:54]))
+breaks=[]
+for a,b in zip(order, order[1:]):
+    pa, pb = res[a].get("C"), res[b].get("N")
+    if pa is None or pb is None: continue
+    d=math.dist(pa,pb)
+    if d>2.0: breaks.append((order.index(b)+1, round(d,2)))
+print("protein residues:", len(order), " chain breaks found:", len(breaks),
+      "at built-residue index(es):", [b[0] for b in breaks[:6]])
+sys.exit(0 if breaks else 1)
+PYEOF
+then
+  :
+else
+  echo "NO CHAIN BREAK in built system -- target and binder were fused into one"
+  echo "chain by tleap. Aborting before MD. Fix: insert a TER record between"
+  echo "the chains in the input PDB and rebuild."
+  exit 1
+fi
