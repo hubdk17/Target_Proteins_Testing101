@@ -79,6 +79,9 @@ def main(argv=None):
     ap.add_argument("--preds")
     ap.add_argument("--ref-dir")
     ap.add_argument("--preds-dir")
+    ap.add_argument("--preds-flat",
+                    help="one flat dir of AF2 predictions named <backbone>_s*.pdb "
+                         "(the shape 100_designability.sbatch produces)")
     ap.add_argument("--cutoff", type=float, default=2.0)
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args(argv)
@@ -116,7 +119,44 @@ def main(argv=None):
             print("scRMSD median    : %.3f A" % np.median(scs))
         return 0
 
-    ap.error("give --ref/--preds or --ref-dir/--preds-dir (or --selftest)")
+    if args.ref_dir and args.preds_flat:
+        refs = sorted(glob.glob(os.path.join(args.ref_dir, "*.pdb")))
+        n_ok = n_tot = 0
+        scs = []
+        for ref in refs:
+            stem = os.path.splitext(os.path.basename(ref))[0]
+            preds = sorted(glob.glob(os.path.join(args.preds_flat, stem + "_s*.pdb")))
+            if not preds:
+                continue
+            refca = ca_coords(ref)
+            best = float("inf")
+            for p in preds:
+                q = ca_coords(p)
+                if q.shape == refca.shape:
+                    r = kabsch_rmsd(q, refca)
+                    if r < best:
+                        best = r
+            if best == float("inf"):
+                continue
+            n_tot += 1
+            scs.append(best)
+            ok = best < args.cutoff
+            n_ok += ok
+            print("%-20s scRMSD %.3f  %s  (%d preds)"
+                  % (stem, best, "DESIGNABLE" if ok else "", len(preds)))
+        if n_tot:
+            scs = np.array(scs)
+            print("\n=== designability (flat AF2 output) ===")
+            print("backbones scored : %d" % n_tot)
+            print("designable (<%.1f): %d  (%.1f%%)"
+                  % (args.cutoff, n_ok, 100.0 * n_ok / n_tot))
+            print("scRMSD median    : %.3f A" % np.median(scs))
+        else:
+            print("no predictions matched any backbone (checked <stem>_s*.pdb)")
+        return 0
+
+    ap.error("give --ref/--preds, --ref-dir/--preds-dir, --ref-dir/--preds-flat, "
+             "or --selftest")
 
 
 def selftest():
