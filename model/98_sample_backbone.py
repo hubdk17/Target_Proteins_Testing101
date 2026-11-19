@@ -97,6 +97,7 @@ def main(argv=None):
     torch.manual_seed(args.seed)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     scale = M.SCALE
+    prior, alpha, kappa = "iid", 1.0, 0.2
     if args.random_init:
         net = M.FrameNet(128, 4).to(dev).eval()
         print("random-init (smoke): no checkpoint loaded")
@@ -107,10 +108,13 @@ def main(argv=None):
         net = M.FrameNet(ck["d_model"], ck["layers"]).to(dev).eval()
         net.load_state_dict(ck["state"])
         scale = ck.get("scale", M.SCALE)
-        print("loaded", args.ckpt)
+        prior = ck.get("prior", "iid")                       # match the training prior
+        alpha = ck.get("alpha", 1.0); kappa = ck.get("kappa", 0.2)
+        print("loaded", args.ckpt, "| prior:", prior)
 
     os.makedirs(args.out_dir, exist_ok=True)
-    x, R = M.sample_latent(net, args.n, args.length, args.steps, dev)
+    x, R = M.sample_latent(net, args.n, args.length, args.steps, dev,
+                           prior=prior, alpha=alpha, kappa=kappa)
     x = x * scale                                            # back to angstrom
     cn_all = []
     for k in range(args.n):

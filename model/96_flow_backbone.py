@@ -194,11 +194,55 @@ def make_batch(chains, idx, device):
 
 # =========================== train / loss ==================================
 
-def flow_loss(net, x1, R1, mask, w_rot, w_dist=1.0):
+# =================== chain-correlated (colored) noise prior ==================
+# Instead of drawing the flow's base noise as independent N(0,I) per residue, draw
+# it from N(0, Sigma) with Sigma = P (Lap+kI)^(-alpha) P over the COVALENT chain
+# graph (path graph), normalised to unit mean marginal variance. Low (smooth,
+# collective) chain modes carry most of the noise, so a sampled starting cloud is
+# already a connected string and the model only has to refine a chain -- the
+# principled fix for the under-sharpened translation field (C-N ~20 A with iid).
+# The covalent graph is always known, so nothing about the fold leaks (a contact
+# graph would). prior="iid" reproduces the original behaviour exactly.
+_PRIOR_CACHE = {}
+
+def colored_sqrt(L, alpha, kappa, device, dtype):
+    key = (L, round(float(alpha), 4), round(float(kappa), 6))
+    C = _PRIOR_CACHE.get(key)
+    if C is None:
+        lap = torch.zeros(L, L, dtype=torch.float64)
+        for i in range(L - 1):
+            lap[i, i] += 1; lap[i + 1, i + 1] += 1
+            lap[i, i + 1] -= 1; lap[i + 1, i] -= 1
+        evals, evecs = torch.linalg.eigh(lap)              # ascending; evals[0]~0
+        w = (evals + kappa).clamp_min(1e-9) ** (-alpha / 2.0)
+        w[0] = 0.0                                          # P: drop const (COM) mode
+        Chalf = (evecs * w) @ evecs.T                      # Sigma^{1/2}
+        # Normalise to the DATA's consecutive-CA spacing (3.8 A / SCALE = 0.38 units)
+        # so the starting cloud is already a chain at the right local scale, not a
+        # gas (iid) nor an arbitrary smooth curve. alpha/kappa then set only the
+        # SHAPE of correlation beyond neighbours (higher alpha = more collective).
+        Sig = Chalf @ Chalf.T
+        di = Sig.diagonal()
+        e2 = (di[:-1] + di[1:] - 2.0 * Sig.diagonal(1)).mean() * 3.0   # E|delta|^2 (3D)
+        target = (3.8 / SCALE) ** 2
+        Chalf = Chalf * (target / e2.clamp_min(1e-12)).sqrt()
+        C = Chalf.to(dtype=dtype)
+        _PRIOR_CACHE[key] = C
+    return C.to(device=device)
+
+def draw_prior(shape, prior, L, alpha, kappa, device, dtype=torch.float32):
+    z = torch.randn(shape, device=device, dtype=dtype)      # (B,L,3)
+    if prior == "colored" and L > 1:
+        C = colored_sqrt(L, alpha, kappa, device, z.dtype)
+        z = torch.einsum("lm,bmd->bld", C, z)
+    return z
+
+
+def flow_loss(net, x1, R1, mask, w_rot, w_dist=1.0, prior="iid", alpha=1.0, kappa=0.2):
     B, L, _ = x1.shape
     t = torch.rand(B, device=x1.device)
     tx = t[:, None, None]
-    x0 = torch.randn_like(x1)
+    x0 = draw_prior(x1.shape, prior, L, alpha, kappa, x1.device, x1.dtype)
     R0 = rand_so3((B, L), x1.device, x1.dtype)
     xt = (1 - tx) * x0 + tx * x1
     tangent = so3_log(R0.transpose(-1, -2) @ R1)                # body-frame log
@@ -222,9 +266,9 @@ def flow_loss(net, x1, R1, mask, w_rot, w_dist=1.0):
 
 
 @torch.no_grad()
-def sample_latent(net, n, L, steps, device):
+def sample_latent(net, n, L, steps, device, prior="iid", alpha=1.0, kappa=0.2):
     """Integrate noise->data in frame space (no PDB; step 3 writes structures)."""
-    x = torch.randn(n, L, 3, device=device)
+    x = draw_prior((n, L, 3), prior, L, alpha, kappa, device)
     R = rand_so3((n, L), device)
     mask = torch.ones(n, L, device=device)
     dt = 1.0 / steps
@@ -253,7 +297,8 @@ def train(args):
         for s in range(0, n, args.batch):
             idx = perm[s:s + args.batch]
             x1, R1, mask = make_batch(chains, idx, dev)
-            loss, lt, lr, ld = flow_loss(net, x1, R1, mask, args.w_rot, args.w_dist)
+            loss, lt, lr, ld = flow_loss(net, x1, R1, mask, args.w_rot, args.w_dist,
+                                         args.prior, args.alpha, args.kappa)
             opt.zero_grad(); loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
             opt.step()
@@ -263,7 +308,9 @@ def train(args):
                   % (ep, tot / nb, tt / nb, tr / nb, td / nb))
     if args.save:
         torch.save({"state": net.state_dict(), "d_model": args.d_model,
-                    "layers": args.layers, "scale": SCALE}, args.save)
+                    "layers": args.layers, "scale": SCALE,
+                    "prior": args.prior, "alpha": args.alpha, "kappa": args.kappa},
+                   args.save)
         print("saved", args.save)
 
 
@@ -320,6 +367,10 @@ def main(argv=None):
     ap.add_argument("--w-rot", type=float, default=1.0)
     ap.add_argument("--w-dist", type=float, default=1.0,
                     help="weight on the consecutive-CA distance (chain) loss")
+    ap.add_argument("--prior", choices=["iid", "colored"], default="iid",
+                    help="base noise: iid N(0,I) or chain-correlated (covalent graph)")
+    ap.add_argument("--alpha", type=float, default=2.0, help="colored prior smoothness exponent")
+    ap.add_argument("--kappa", type=float, default=0.1, help="colored prior graph-Laplacian shift")
     ap.add_argument("--log-every", type=int, default=10)
     ap.add_argument("--save", default=None)
     args = ap.parse_args(argv)
