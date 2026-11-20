@@ -238,7 +238,8 @@ def draw_prior(shape, prior, L, alpha, kappa, device, dtype=torch.float32):
     return z
 
 
-def flow_loss(net, x1, R1, mask, w_rot, w_dist=1.0, prior="iid", alpha=1.0, kappa=0.2):
+def flow_loss(net, x1, R1, mask, w_rot, w_dist=1.0, prior="iid", alpha=1.0, kappa=0.2,
+              w_dgram=0.0, dgram_w=12):
     B, L, _ = x1.shape
     t = torch.rand(B, device=x1.device)
     tx = t[:, None, None]
@@ -262,7 +263,21 @@ def flow_loss(net, x1, R1, mask, w_rot, w_dist=1.0, prior="iid", alpha=1.0, kapp
         dt = torch.linalg.norm(x1[:, 1:] - x1[:, :-1], dim=-1)
         nm = mask[:, 1:] * mask[:, :-1]
         ld = (((dp - dt) * nm) ** 2).sum() / nm.sum().clamp_min(1.0)
-    return lt + w_rot * lr + w_dist * ld, lt.item(), lr.item(), float(ld)
+    # distogram loss: match the LOCAL-band pairwise CA-CA distances (|i-j| <= dgram_w).
+    # Consecutive spacing (ld) only fixes connectivity; the local distance pattern is
+    # what encodes secondary structure (i,i+2/3/4) and local packing. Restricted to a
+    # band because the full O(L^2) matrix is dominated by long-range pairs, which chase
+    # global extent and blow the structure up (CPU-tested: full-matrix diverged).
+    ldg = px1.new_zeros(())
+    if w_dgram > 0 and L > 1:
+        dpp = torch.cdist(px1, px1)                              # (B,L,L)
+        dtt = torch.cdist(x1, x1)
+        ii = torch.arange(L, device=x1.device)
+        band = (ii[None, :] - ii[:, None]).abs() <= dgram_w     # (L,L) local window
+        pm = mask[:, :, None] * mask[:, None, :] * band
+        ldg = (((dpp - dtt) * pm) ** 2).sum() / pm.sum().clamp_min(1.0)
+    return (lt + w_rot * lr + w_dist * ld + w_dgram * ldg,
+            lt.item(), lr.item(), float(ld), float(ldg))
 
 
 @torch.no_grad()
@@ -293,19 +308,19 @@ def train(args):
     n = len(chains)
     for ep in range(args.epochs):
         perm = torch.randperm(n).tolist()
-        tot = tt = tr = td = 0.0; nb = 0
+        tot = tt = tr = td = tg = 0.0; nb = 0
         for s in range(0, n, args.batch):
             idx = perm[s:s + args.batch]
             x1, R1, mask = make_batch(chains, idx, dev)
-            loss, lt, lr, ld = flow_loss(net, x1, R1, mask, args.w_rot, args.w_dist,
-                                         args.prior, args.alpha, args.kappa)
+            loss, lt, lr, ld, ldg = flow_loss(net, x1, R1, mask, args.w_rot, args.w_dist,
+                                              args.prior, args.alpha, args.kappa, args.w_dgram)
             opt.zero_grad(); loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
             opt.step()
-            tot += loss.item(); tt += lt; tr += lr; td += ld; nb += 1
+            tot += loss.item(); tt += lt; tr += lr; td += ld; tg += ldg; nb += 1
         if ep % args.log_every == 0 or ep == args.epochs - 1:
-            print("epoch %4d  loss %.4f  trans %.4f  rot %.4f  dist %.4f"
-                  % (ep, tot / nb, tt / nb, tr / nb, td / nb))
+            print("epoch %4d  loss %.4f  trans %.4f  rot %.4f  dist %.4f  dgram %.4f"
+                  % (ep, tot / nb, tt / nb, tr / nb, td / nb, tg / nb))
     if args.save:
         torch.save({"state": net.state_dict(), "d_model": args.d_model,
                     "layers": args.layers, "scale": SCALE,
@@ -335,7 +350,7 @@ def smoke():
     for step in range(30):
         idx = list(range(len(chains)))
         x1, R1, mask = make_batch(chains, idx, dev)
-        loss, lt, lr, ld = flow_loss(net, x1, R1, mask, 1.0, 1.0)
+        loss, lt, lr, ld, ldg = flow_loss(net, x1, R1, mask, 1.0, 1.0, w_dgram=1.0)
         opt.zero_grad(); loss.backward(); opt.step()
         if step == 0: first = loss.item()
         last = loss.item()
@@ -367,6 +382,8 @@ def main(argv=None):
     ap.add_argument("--w-rot", type=float, default=1.0)
     ap.add_argument("--w-dist", type=float, default=1.0,
                     help="weight on the consecutive-CA distance (chain) loss")
+    ap.add_argument("--w-dgram", type=float, default=0.0,
+                    help="weight on the full pairwise-CA distogram loss (SS/packing/compactness)")
     ap.add_argument("--prior", choices=["iid", "colored"], default="iid",
                     help="base noise: iid N(0,I) or chain-correlated (covalent graph)")
     ap.add_argument("--alpha", type=float, default=2.0, help="colored prior smoothness exponent")
