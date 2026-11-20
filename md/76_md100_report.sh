@@ -5,13 +5,14 @@
 #   srun --cpus-per-task=4 --mem=16G --time=00:40:00 \
 #     --container-image=/home/hpc_apps/nvidia+nvhpc+25.3-devel-cuda_multi-ubuntu22.04.sqsh \
 #     --container-mounts=/home/dakshcsed:/workspace \
-#     bash /workspace/rfd/scripts/md/76_md100_report.sh p53_mdm2
+#     bash /workspace/rfd/scripts_md/md/76_md100_report.sh p53_mdm2
 #
 # args: <run-name under runs100/> [binder_len=13] [anchor offsets, 1-based in
 #       the binder, default "3 7 10" = p53 Phe19 / Trp23 / Leu26]
 set -uo pipefail
-source /workspace/rfd/scripts/md/_amber_env.sh
-cd /workspace/rfd/scripts
+S="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$S/md/_amber_env.sh"
+cd "$S"
 
 NAME="$1"; BLEN="${2:-13}"; ANCH="${3:-3 7 10}"
 D="runs100/$NAME"

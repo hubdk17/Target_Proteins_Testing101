@@ -4,7 +4,24 @@
 ten resumable 10 ns chunks, and read the result per window instead of only
 start-vs-end.
 
-## Submit (from `~/rfd/scripts`, after `module load slurm`)
+## Give this work its own clone
+
+`~/rfd/scripts` is shared with the backbone-generator workstream, which works
+on another branch. The sbatch wrapper is copied by Slurm at submit time, but
+**the inner script is read on the compute node at job runtime out of the
+working tree you submitted from** — so a `git checkout` in the shared clone
+between submit and execution deletes the script mid-flight (job 193870,
+exit 127). Checking out the right branch before submitting does not fix it,
+because the race is after the submit. Use a separate clone:
+
+```
+cd ~/rfd && git clone -b claude/project-thread-wr005i \
+  https://github.com/hubdk17/Target_Proteins_Testing101.git scripts_md
+```
+
+Every script here resolves its own location, so a clone at any path works.
+
+## Submit (from your MD clone, after `module load slurm`)
 
 ```
 sbatch --gres=gpu:1 --time=24:00:00 --exclude=dgxanode03,dgxhnode6 \
@@ -26,7 +43,7 @@ kernels ("no kernel image"); drop it once an H100 run is seen to work.
 srun --cpus-per-task=4 --mem=16G --time=00:40:00 \
   --container-image=/home/hpc_apps/nvidia+nvhpc+25.3-devel-cuda_multi-ubuntu22.04.sqsh \
   --container-mounts=/home/dakshcsed:/workspace \
-  bash /workspace/rfd/scripts/md/76_md100_report.sh p53_mdm2
+  bash /workspace/rfd/scripts_md/md/76_md100_report.sh p53_mdm2
 ```
 
 Prints, per 10 ns window: binder heavy-atom RMSD against the start, total

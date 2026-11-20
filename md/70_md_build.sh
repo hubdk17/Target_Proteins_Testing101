@@ -12,7 +12,9 @@
 # awk: 71_clean_pdb.awk and 71_check_built.awk.
 set -euo pipefail
 PDB="$1"; OUT="$2"; mkdir -p "$OUT"
-S=/workspace/rfd/scripts
+# Derive the scripts root from this script's own location, so the clone can
+# live anywhere (~/rfd/scripts, ~/rfd/scripts_md, ...) without edits.
+S="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$S/md/_amber_env.sh"
 
 command -v tleap >/dev/null || { echo "ERROR: tleap not found on PATH under $AMBERHOME"; exit 1; }

@@ -10,7 +10,7 @@
 # so a half-written chunk is redone rather than silently treated as 10 ns.
 set -euo pipefail
 PDB="$1"; OUT="$2"; NCHUNK="${3:-10}"
-S=/workspace/rfd/scripts
+S="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$S/md/_amber_env.sh"
 cd "$S"
 mkdir -p "$OUT"

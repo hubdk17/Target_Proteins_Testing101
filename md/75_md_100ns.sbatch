@@ -3,7 +3,8 @@
 #SBATCH --nodes=1 --ntasks-per-node=1 --cpus-per-task=4 --mem=32G
 #
 # 100 ns MD of one complex, build included, in 10 ns resumable chunks.
-# Submit FROM ~/rfd/scripts (sbatch opens md/... relative to cwd):
+# Submit FROM your MD clone, e.g. ~/rfd/scripts_md (sbatch opens md/...
+# relative to cwd, and every script resolves its own location):
 #
 #   sbatch --gres=gpu:1 --time=24:00:00 --exclude=dgxanode03,dgxhnode6 \
 #          --job-name=md100_p53 --output=logs/%x_%j.out --error=logs/%x_%j.err \
@@ -16,5 +17,13 @@
 # prebuilt pmemd.cuda may not carry H100 kernels.
 PDB="$1"; OUT="$2"; NCHUNK="${3:-10}"
 IMG=/home/hpc_apps/nvidia+nvhpc+25.3-devel-cuda_multi-ubuntu22.04.sqsh
-srun --container-image=$IMG --container-mounts=/home/dakshcsed:/workspace \
-     bash /workspace/rfd/scripts/md/75_md_100ns_inner.sh "$PDB" "$OUT" "$NCHUNK"
+# The inner script is read on the COMPUTE NODE at runtime, out of the working
+# tree you submitted from -- so hardcoding a clone path lets another
+# workstream's `git checkout` in a shared clone delete it between submit and
+# execution (job 193870, exit 127). Resolve it from the submit directory
+# instead, mapped into the container ($HOME is mounted at /workspace).
+SUB="${SLURM_SUBMIT_DIR:-$PWD}"
+CSUB="/workspace${SUB#$HOME}"
+echo "[submit] $SUB -> container $CSUB"
+srun --container-image=$IMG --container-mounts=$HOME:/workspace \
+     bash "$CSUB/md/75_md_100ns_inner.sh" "$PDB" "$OUT" "$NCHUNK"
