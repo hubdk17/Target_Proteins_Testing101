@@ -98,6 +98,7 @@ def main(argv=None):
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     scale = M.SCALE
     prior, alpha, kappa = "iid", 1.0, 0.2
+    rot_prior, rot_sigma = "iid", 0.5
     if args.random_init:
         net = M.FrameNet(128, 4).to(dev).eval()
         print("random-init (smoke): no checkpoint loaded")
@@ -110,11 +111,13 @@ def main(argv=None):
         scale = ck.get("scale", M.SCALE)
         prior = ck.get("prior", "iid")                       # match the training prior
         alpha = ck.get("alpha", 1.0); kappa = ck.get("kappa", 0.2)
-        print("loaded", args.ckpt, "| prior:", prior)
+        rot_prior = ck.get("rot_prior", "iid"); rot_sigma = ck.get("rot_sigma", 0.5)
+        print("loaded", args.ckpt, "| prior:", prior, "| rot_prior:", rot_prior)
 
     os.makedirs(args.out_dir, exist_ok=True)
     x, R = M.sample_latent(net, args.n, args.length, args.steps, dev,
-                           prior=prior, alpha=alpha, kappa=kappa)
+                           prior=prior, alpha=alpha, kappa=kappa,
+                           rot_prior=rot_prior, rot_sigma=rot_sigma)
     x = x * scale                                            # back to angstrom
     cn_all = []
     for k in range(args.n):

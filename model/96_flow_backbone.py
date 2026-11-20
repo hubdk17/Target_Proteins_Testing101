@@ -238,13 +238,41 @@ def draw_prior(shape, prior, L, alpha, kappa, device, dtype=torch.float32):
     return z
 
 
+# ================= chain-correlated (smooth) ROTATION prior ==================
+# The colored prior above smooths only the TRANSLATION base noise. But secondary
+# structure lives in the frame ROTATIONS -- a helix is a regular ~100 deg/residue
+# turn about a fixed axis, a strand an alternating flip -- and the base rotation
+# noise is still iid-uniform SO(3) per residue (rand_so3), so neighbouring frames
+# start with totally unrelated orientations. The model then has to invent a
+# coherent rotation progression from scratch, and it doesn't (rot loss stuck ~0.24,
+# ~75% loop, and even overfitting ONE helix it produces loop). This prior instead
+# seeds R0 as a SMOOTH rotational random walk along the covalent chain:
+#   R0[0] ~ uniform SO(3);  R0[i] = R0[i-1] @ exp(sigma * N(0,I_3))
+# so consecutive starting frames already vary smoothly -- the rotation analog of
+# the translation prior that fixed connectivity. rot_prior="iid" == rand_so3.
+def smooth_so3(B, L, sigma, device, dtype=torch.float32):
+    R = rand_so3((B,), device, dtype)                       # (B,3,3) random start
+    out = [R]
+    for _ in range(1, L):
+        step = so3_exp(sigma * torch.randn(B, 3, device=device, dtype=dtype))
+        R = R @ step
+        out.append(R)
+    return torch.stack(out, dim=1)                          # (B,L,3,3)
+
+
+def draw_rot_prior(B, L, rot_prior, rot_sigma, device, dtype=torch.float32):
+    if rot_prior == "smooth" and L > 1:
+        return smooth_so3(B, L, rot_sigma, device, dtype)
+    return rand_so3((B, L), device, dtype)
+
+
 def flow_loss(net, x1, R1, mask, w_rot, w_dist=1.0, prior="iid", alpha=1.0, kappa=0.2,
-              w_dgram=0.0, dgram_w=12):
+              w_dgram=0.0, dgram_w=12, rot_prior="iid", rot_sigma=0.5):
     B, L, _ = x1.shape
     t = torch.rand(B, device=x1.device)
     tx = t[:, None, None]
     x0 = draw_prior(x1.shape, prior, L, alpha, kappa, x1.device, x1.dtype)
-    R0 = rand_so3((B, L), x1.device, x1.dtype)
+    R0 = draw_rot_prior(B, L, rot_prior, rot_sigma, x1.device, x1.dtype)
     xt = (1 - tx) * x0 + tx * x1
     tangent = so3_log(R0.transpose(-1, -2) @ R1)                # body-frame log
     Rt = R0 @ so3_exp(t[:, None, None] * tangent)
@@ -281,10 +309,11 @@ def flow_loss(net, x1, R1, mask, w_rot, w_dist=1.0, prior="iid", alpha=1.0, kapp
 
 
 @torch.no_grad()
-def sample_latent(net, n, L, steps, device, prior="iid", alpha=1.0, kappa=0.2):
+def sample_latent(net, n, L, steps, device, prior="iid", alpha=1.0, kappa=0.2,
+                  rot_prior="iid", rot_sigma=0.5):
     """Integrate noise->data in frame space (no PDB; step 3 writes structures)."""
     x = draw_prior((n, L, 3), prior, L, alpha, kappa, device)
-    R = rand_so3((n, L), device)
+    R = draw_rot_prior(n, L, rot_prior, rot_sigma, device)
     mask = torch.ones(n, L, device=device)
     dt = 1.0 / steps
     for k in range(steps):
@@ -313,7 +342,8 @@ def train(args):
             idx = perm[s:s + args.batch]
             x1, R1, mask = make_batch(chains, idx, dev)
             loss, lt, lr, ld, ldg = flow_loss(net, x1, R1, mask, args.w_rot, args.w_dist,
-                                              args.prior, args.alpha, args.kappa, args.w_dgram)
+                                              args.prior, args.alpha, args.kappa, args.w_dgram,
+                                              rot_prior=args.rot_prior, rot_sigma=args.rot_sigma)
             opt.zero_grad(); loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
             opt.step()
@@ -324,7 +354,8 @@ def train(args):
     if args.save:
         torch.save({"state": net.state_dict(), "d_model": args.d_model,
                     "layers": args.layers, "scale": SCALE,
-                    "prior": args.prior, "alpha": args.alpha, "kappa": args.kappa},
+                    "prior": args.prior, "alpha": args.alpha, "kappa": args.kappa,
+                    "rot_prior": args.rot_prior, "rot_sigma": args.rot_sigma},
                    args.save)
         print("saved", args.save)
 
@@ -388,6 +419,10 @@ def main(argv=None):
                     help="base noise: iid N(0,I) or chain-correlated (covalent graph)")
     ap.add_argument("--alpha", type=float, default=2.0, help="colored prior smoothness exponent")
     ap.add_argument("--kappa", type=float, default=0.1, help="colored prior graph-Laplacian shift")
+    ap.add_argument("--rot-prior", choices=["iid", "smooth"], default="iid",
+                    help="base rotation noise: iid uniform SO(3), or a smooth chain walk (seeds SS)")
+    ap.add_argument("--rot-sigma", type=float, default=0.5,
+                    help="per-residue rotation step size (rad) of the smooth rotation prior")
     ap.add_argument("--log-every", type=int, default=10)
     ap.add_argument("--save", default=None)
     args = ap.parse_args(argv)
