@@ -11,8 +11,9 @@
 #
 # args: <complex.pdb> <outdir> [nchunks, 10 ns each; default 10 = 100 ns]
 # Re-submitting the identical line after any failure resumes from the last
-# finished chunk.  dgxhnode6 is excluded because the prebuilt pmemd.cuda may
-# not carry H100 kernels; drop the exclude once it is seen to work there.
+# finished chunk.  dgxanode03 is excluded because it reports an NVML driver/
+# library version mismatch (no CUDA job can run there); dgxhnode6 because the
+# prebuilt pmemd.cuda may not carry H100 kernels.
 PDB="$1"; OUT="$2"; NCHUNK="${3:-10}"
 IMG=/home/hpc_apps/nvidia+nvhpc+25.3-devel-cuda_multi-ubuntu22.04.sqsh
 srun --container-image=$IMG --container-mounts=/home/dakshcsed:/workspace \
