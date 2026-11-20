@@ -7,7 +7,7 @@ start-vs-end.
 ## Submit (from `~/rfd/scripts`, after `module load slurm`)
 
 ```
-sbatch --gres=gpu:1 --time=24:00:00 --exclude=dgxhnode6 \
+sbatch --gres=gpu:1 --time=24:00:00 --exclude=dgxanode03,dgxhnode6 \
   --job-name=md100_p53 --output=logs/%x_%j.out --error=logs/%x_%j.err \
   md/75_md_100ns.sbatch mdm2_blind/ref_p53.pdb runs100/p53_mdm2 10
 ```
@@ -56,3 +56,15 @@ thermal motion. It is one-sided: *fell off* is strong evidence, *stayed on* is
 weak — barnase–barstar's bound lifetime is ~35 hours against 100 ns simulated.
 It does not give affinity, ΔG or k_off, and MM-GBSA cannot rescue it into one
 (it returns a precisely wrong **positive** ΔG for trypsin–BPTI, Kd ~10⁻¹⁴ M).
+
+## No python in the container
+
+The nvhpc container ships no python at all — no `/usr/bin/python3`, nothing on
+`PATH`, and the AMBER 24 archive bundles no interpreter either. So `pdb4amber`,
+a `#!/usr/bin/python3` script, exits 126 on its first line and the build dies
+before touching the structure (job 188654, 2026-11-19). The cleaning and both
+gates are therefore awk: `71_clean_pdb.awk` and `71_check_built.awk`. Nothing
+in the MD path calls python.
+
+`dgxanode03` reports `Failed to initialize NVML: Driver/library version
+mismatch`, so no CUDA job can run there. It is excluded alongside the H100.
