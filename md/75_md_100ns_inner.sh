@@ -29,11 +29,11 @@ P="$S/md"
 
 if [ ! -f equil.rst ]; then
   echo "=== minimisation (also the pmemd.cuda / GPU-load test) ==="
-  pmemd.cuda -O -i "$P/min.in"   -p sys.prmtop -c sys.inpcrd -ref sys.inpcrd -o min.out   -r min.rst   -x min.nc
+  "$PMEMD" -O -i "$P/min.in"   -p sys.prmtop -c sys.inpcrd -ref sys.inpcrd -o min.out   -r min.rst   -x min.nc
   echo "=== heat 0->300 K ==="
-  pmemd.cuda -O -i "$P/heat.in"  -p sys.prmtop -c min.rst    -ref min.rst    -o heat.out  -r heat.rst  -x heat.nc
+  "$PMEMD" -O -i "$P/heat.in"  -p sys.prmtop -c min.rst    -ref min.rst    -o heat.out  -r heat.rst  -x heat.nc
   echo "=== equilibration 500 ps NPT ==="
-  pmemd.cuda -O -i "$P/equil.in" -p sys.prmtop -c heat.rst   -ref heat.rst   -o equil.out -r equil.rst -x equil.nc
+  "$PMEMD" -O -i "$P/equil.in" -p sys.prmtop -c heat.rst   -ref heat.rst   -o equil.out -r equil.rst -x equil.nc
 else
   echo "[skip] min/heat/equil: equil.rst exists"
 fi
@@ -47,7 +47,7 @@ for i in $(seq 1 "$NCHUNK"); do
   rm -f "prod_$tag.rst.tmp" "prod_$tag.nc.tmp"
   t0=$SECONDS
   echo "=== production chunk $tag / $NCHUNK (10 ns) from $prev ==="
-  pmemd.cuda -O -i "$P/prod.in" -p sys.prmtop -c "$prev" \
+  "$PMEMD" -O -i "$P/prod.in" -p sys.prmtop -c "$prev" \
              -o "prod_$tag.out" -r "prod_$tag.rst.tmp" -x "prod_$tag.nc.tmp"
   mv "prod_$tag.nc.tmp"  "prod_$tag.nc"
   mv "prod_$tag.rst.tmp" "prod_$tag.rst"

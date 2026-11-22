@@ -19,3 +19,17 @@ for u in /workspace/amber/usr /workspace/usr "$(dirname "$AMBERHOME")/usr"; do
   fi
 done
 echo "[amber_env] AMBERHOME=$AMBERHOME"
+
+# Resolve the MD engine by ABSOLUTE PATH, not by name. `pmemd.cuda` is listed in
+# the archive's bin yet a PATH lookup for it failed with "command not found"
+# (job 194210), so the generic name is not dependable here -- a dangling symlink
+# would look exactly like this. -x follows symlinks, so a broken one falls
+# through to the real SPFP/DPFP binary.
+for p in "$AMBERHOME/bin/pmemd.cuda" "$AMBERHOME/bin/pmemd.cuda_SPFP" \
+         "$AMBERHOME/bin/pmemd.cuda_DPFP"; do
+  if [ -x "$p" ]; then export PMEMD="$p"; break; fi
+done
+if [ -z "${PMEMD:-}" ]; then
+  echo "ERROR: no executable pmemd.cuda/_SPFP/_DPFP under $AMBERHOME/bin"; exit 1
+fi
+echo "[amber_env] PMEMD=$PMEMD"
