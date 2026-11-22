@@ -92,6 +92,11 @@ def main(argv=None):
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--vclamp", type=float, default=None,
+                    help="cap the OT translation velocity (tames the 1/(1-t) blow-up "
+                         "that inflates sampled chains); off by default")
+    ap.add_argument("--t-stop", type=float, default=1.0,
+                    help="end integration early at this t (avoids the unstable late-t region)")
     args = ap.parse_args(argv)
 
     torch.manual_seed(args.seed)
@@ -117,7 +122,8 @@ def main(argv=None):
     os.makedirs(args.out_dir, exist_ok=True)
     x, R = M.sample_latent(net, args.n, args.length, args.steps, dev,
                            prior=prior, alpha=alpha, kappa=kappa,
-                           rot_prior=rot_prior, rot_sigma=rot_sigma)
+                           rot_prior=rot_prior, rot_sigma=rot_sigma,
+                           vclamp=args.vclamp, t_stop=args.t_stop)
     x = x * scale                                            # back to angstrom
     cn_all = []
     for k in range(args.n):

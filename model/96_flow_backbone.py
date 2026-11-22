@@ -310,17 +310,31 @@ def flow_loss(net, x1, R1, mask, w_rot, w_dist=1.0, prior="iid", alpha=1.0, kapp
 
 @torch.no_grad()
 def sample_latent(net, n, L, steps, device, prior="iid", alpha=1.0, kappa=0.2,
-                  rot_prior="iid", rot_sigma=0.5):
-    """Integrate noise->data in frame space (no PDB; step 3 writes structures)."""
+                  rot_prior="iid", rot_sigma=0.5, vclamp=None, t_stop=1.0):
+    """Integrate noise->data in frame space (no PDB; step 3 writes structures).
+
+    The OT velocity is (px1 - x)/(1 - t), whose 1/(1-t) factor blows up near t=1
+    and compounds any off-manifold drift in px1 -- diagnosed as the cause of the
+    sampled chain INFLATING (CA-CA 3.8 in training -> ~5-8 sampled, worse with more
+    steps). `vclamp` caps the per-component translation velocity to tame that blow-up;
+    `t_stop` ends integration early (before the unstable late-t region). Both are
+    inference-only knobs (not stored in the checkpoint); defaults reproduce the
+    original ODE exactly."""
     x = draw_prior((n, L, 3), prior, L, alpha, kappa, device)
     R = draw_rot_prior(n, L, rot_prior, rot_sigma, device)
     mask = torch.ones(n, L, device=device)
     dt = 1.0 / steps
     for k in range(steps):
-        t = torch.full((n,), k * dt, device=device)
-        rem = max(1 - k * dt, 1e-3)
+        tk = k * dt
+        if tk >= t_stop:
+            break
+        t = torch.full((n,), tk, device=device)
+        rem = max(1 - tk, 1e-3)
         px1, pR1 = net(x, R, t, mask)
-        x = x + dt * (px1 - x) / rem
+        v = (px1 - x) / rem
+        if vclamp is not None:
+            v = v.clamp(-vclamp, vclamp)
+        x = x + dt * v
         tang = so3_log(R.transpose(-1, -2) @ pR1) / rem
         R = R @ so3_exp(dt * tang)
     return x, R
