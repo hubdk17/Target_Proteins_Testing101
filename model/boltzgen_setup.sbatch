@@ -34,17 +34,23 @@ set -uo pipefail
 ROOT=/workspace/rfd
 VENV=$ROOT/venv_boltzgen
 python --version
-echo "=== create venv (reuses container torch) ==="
-python -m venv --system-site-packages "$VENV"
+# First attempt reused the container torch (--system-site-packages + torch pin), but
+# BoltzGen pulls numpy 2.0.2 and the container torch (NGC 2.7.0) was built against
+# numpy 1.x -> "import torch" crashes. So build a SELF-CONTAINED venv: no
+# system-site-packages, discard the container pip constraint entirely (PIP_CONSTRAINT
+# off), and let BoltzGen install its own consistent torch+numpy2+numba stack from PyPI
+# (reachable from compute). Costs a ~GB torch download; thats fine on /home.
+echo "=== recreate venv WITHOUT system-site-packages ==="
+rm -rf "$VENV"
+python -m venv "$VENV"
 source "$VENV/bin/activate"
-python -c "import torch;print(\"container torch==\"+torch.__version__)"
-python -c "import torch;print(\"torch==\"+torch.__version__)" > "$ROOT/pipc_bg.txt"
-echo "=== DRY-RUN install plan (catches torch/constraint conflicts) ==="
-PIP_CONSTRAINT="$ROOT/pipc_bg.txt" pip install --dry-run boltzgen 2>&1 | tail -40
-echo "=== REAL install ==="
-PIP_CONSTRAINT="$ROOT/pipc_bg.txt" pip install --no-cache-dir boltzgen 2>&1 | tail -25
-echo "=== verify ==="
-which boltzgen && boltzgen --help 2>&1 | head -15
-python -c "import torch;print(\"final torch==\"+torch.__version__,\"cuda\",torch.version.cuda)"
+pip install --upgrade pip 2>&1 | tail -1
+echo "=== install boltzgen with its own stack (container pip constraint disabled) ==="
+export PIP_CONSTRAINT=/dev/null
+pip install --no-cache-dir boltzgen 2>&1 | tail -25
+echo "=== verify (no GPU on this env-build node, so cuda avail=False is expected) ==="
+which boltzgen
+python -c "import numpy,torch;print(\"numpy\",numpy.__version__,\"torch\",torch.__version__,\"cuda\",torch.version.cuda,\"avail\",torch.cuda.is_available())"
+boltzgen --help 2>&1 | head -15
 echo "=== done ==="
 '
