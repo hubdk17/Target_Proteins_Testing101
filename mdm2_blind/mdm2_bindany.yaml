@@ -1,0 +1,25 @@
+# BoltzGen design specification — de novo protein binder against MDM2
+# FIRST "does-it-run" baseline: bind-anywhere (no binding-site residues specified,
+# so no label_seq_id mapping is needed yet). Site-specific (p53 hydrophobic cleft)
+# comes in a later spec once this pipeline is confirmed end to end.
+#
+# Target: MDM2 p53-binding domain, chain A, residues 25-109 (mdm2_receptor.pdb,
+#         same directory as this file). ref_p53.pdb in this dir is the natural
+#         p53 transactivation helix = positive reference for comparison.
+#
+# Run (from this directory, weights pre-cached; skip ESMFold2 analysis — no CUDA-13 driver):
+#   boltzgen run mdm2_bindany.yaml --output <out> --protocol protein-anything \
+#     --num_designs 20 --steps design inverse_folding folding filtering
+#
+entities:
+  # Designed de novo binder; length randomly sampled in this range per design.
+  - protein:
+      id: B
+      sequence: 60..100
+
+  # Target extracted from the PDB (path is relative to this .yaml file).
+  - file:
+      path: mdm2_receptor.pdb
+      include:
+        - chain:
+            id: A
