@@ -32,6 +32,9 @@ PROTO="${PROTO:-protein-anything}"
 # with SolubleMPNN not yet cached, use STEPS="design" (design step needs only the
 # cached design checkpoints + moldir — no SolubleMPNN, no HF access at runtime).
 STEPS="${STEPS:-design inverse_folding folding filtering}"
+# Optional local SolubleMPNN checkpoint. Compute nodes can't fetch it from HF/IPD, so
+# pre-download solublempnn_v_48_020.pt on the login node and pass its path here.
+SMPNN="${SMPNN:-}"
 STAMP=$(date +%m%d_%H%M)
 OUT="${OUT:-$HOME/rfd/outputs/bg_$(basename ${SPEC%.yaml})_${STAMP}}"
 
@@ -50,8 +53,10 @@ echo "=== 1/2 check spec ==="
 boltzgen check "$SPECFILE"
 
 echo "=== 2/2 run (steps: $STEPS) ==="
+SMPNN_ARG=()
+[ -n "$SMPNN" ] && { test -f "$SMPNN" || { echo "SMPNN=$SMPNN not found"; exit 1; }; SMPNN_ARG=(--solublempnn_checkpoint "$SMPNN"); echo "using local SolubleMPNN: $SMPNN"; }
 boltzgen run "$SPECFILE" --output "$OUT" --protocol "$PROTO" \
-  --num_designs "$N" --steps $STEPS --reuse
+  --num_designs "$N" --steps $STEPS ${SMPNN_ARG[@]+"${SMPNN_ARG[@]}"} --reuse
 
 echo "=== output tree ==="
 ls -R "$OUT" 2>/dev/null | head -80
