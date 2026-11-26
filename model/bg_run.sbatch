@@ -28,6 +28,10 @@ VENV=$HOME/rfd/venv_boltzgen
 SPEC="${SPEC:-mdm2_blind/mdm2_bindany.yaml}"
 N="${N:-20}"
 PROTO="${PROTO:-protein-anything}"
+# Steps override. Default = full pipeline minus ESMFold2 analysis. For a first run
+# with SolubleMPNN not yet cached, use STEPS="design" (design step needs only the
+# cached design checkpoints + moldir — no SolubleMPNN, no HF access at runtime).
+STEPS="${STEPS:-design inverse_folding folding filtering}"
 STAMP=$(date +%m%d_%H%M)
 OUT="${OUT:-$HOME/rfd/outputs/bg_$(basename ${SPEC%.yaml})_${STAMP}}"
 
@@ -45,9 +49,9 @@ python -c "import torch;print('torch',torch.__version__,'cuda avail',torch.cuda.
 echo "=== 1/2 check spec ==="
 boltzgen check "$SPECFILE"
 
-echo "=== 2/2 run (steps: design inverse_folding folding filtering; ESMFold2 analysis skipped) ==="
+echo "=== 2/2 run (steps: $STEPS) ==="
 boltzgen run "$SPECFILE" --output "$OUT" --protocol "$PROTO" \
-  --num_designs "$N" --steps design inverse_folding folding filtering --reuse
+  --num_designs "$N" --steps $STEPS --reuse
 
 echo "=== output tree ==="
 ls -R "$OUT" 2>/dev/null | head -80
