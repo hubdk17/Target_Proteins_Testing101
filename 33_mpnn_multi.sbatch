@@ -28,7 +28,8 @@
 #SBATCH --error=logs/%x_%A_%a.err
 
 IMAGE=/home/hpc_apps/nvidia+pytorch+25.04-py3.sqsh
-TABLE="$HOME/rfd/inputs/targets.tsv"
+# Overridable so a single-target table (e.g. mdm2_blind/mdm2_rfd.tsv) can drive it.
+TABLE="${TABLE:-$HOME/rfd/inputs/targets.tsv}"
 
 # 8 exposed the problem on IL-6 but is on the low side; gate 2 picks among these,
 # so give it a real choice.
