@@ -28,13 +28,15 @@ VENV=$HOME/rfd/venv_boltzgen
 SPEC="${SPEC:-mdm2_blind/mdm2_bindany.yaml}"
 N="${N:-20}"
 PROTO="${PROTO:-protein-anything}"
-# Steps override. Default = full pipeline minus ESMFold2 analysis. For a first run
-# with SolubleMPNN not yet cached, use STEPS="design" (design step needs only the
-# cached design checkpoints + moldir — no SolubleMPNN, no HF access at runtime).
+# Steps override. Default = full pipeline minus ESMFold2 analysis. To only produce
+# backbones first, use STEPS="design" (design needs only the cached design
+# checkpoints + moldir). All default checkpoints are cached, so no HF access at runtime.
 STEPS="${STEPS:-design inverse_folding folding filtering}"
-# Optional local SolubleMPNN checkpoint. Compute nodes can't fetch it from HF/IPD, so
-# pre-download solublempnn_v_48_020.pt on the login node and pass its path here.
-SMPNN="${SMPNN:-}"
+# Optional override for the inverse-folding checkpoint. The real flag in 0.3.2 is
+# --inverse_fold_checkpoint (there is NO --solublempnn_checkpoint). Leave empty to
+# use the cached default inverse-folding model, which `boltzgen download all`
+# already fetched, so the step runs offline on the compute node.
+IFCKPT="${IFCKPT:-}"
 STAMP=$(date +%m%d_%H%M)
 OUT="${OUT:-$HOME/rfd/outputs/bg_$(basename ${SPEC%.yaml})_${STAMP}}"
 
@@ -53,10 +55,10 @@ echo "=== 1/2 check spec ==="
 boltzgen check "$SPECFILE"
 
 echo "=== 2/2 run (steps: $STEPS) ==="
-SMPNN_ARG=()
-[ -n "$SMPNN" ] && { test -f "$SMPNN" || { echo "SMPNN=$SMPNN not found"; exit 1; }; SMPNN_ARG=(--solublempnn_checkpoint "$SMPNN"); echo "using local SolubleMPNN: $SMPNN"; }
+IF_ARG=()
+[ -n "$IFCKPT" ] && { test -f "$IFCKPT" || { echo "IFCKPT=$IFCKPT not found"; exit 1; }; IF_ARG=(--inverse_fold_checkpoint "$IFCKPT"); echo "using inverse-fold checkpoint: $IFCKPT"; }
 boltzgen run "$SPECFILE" --output "$OUT" --protocol "$PROTO" \
-  --num_designs "$N" --steps $STEPS ${SMPNN_ARG[@]+"${SMPNN_ARG[@]}"} --reuse
+  --num_designs "$N" --steps $STEPS ${IF_ARG[@]+"${IF_ARG[@]}"} --reuse
 
 echo "=== output tree ==="
 ls -R "$OUT" 2>/dev/null | head -80
