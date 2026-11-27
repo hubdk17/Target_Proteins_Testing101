@@ -27,7 +27,11 @@ import os
 import sys
 
 ROOT = os.path.expanduser("~/rfd")
-CPLX = os.path.join(ROOT, "cplx_out", "mdm2")
+# Which scored set to check: cplx_out/<SET> + cp_<SET>_*.sc. Default the RFdiffusion
+# set "mdm2"; set CPLXSET=mdm2bg for the BoltzGen set. Mapping is identical because
+# the MDM2 target is the same 85 residues (crystal 25-109) in both.
+SET = os.environ.get("CPLXSET", "mdm2")
+CPLX = os.path.join(ROOT, "cplx_out", SET)
 HOTSPOTS = [61, 62, 67, 93, 99]   # MDM2 crystal numbering, the p53 cleft we aimed at
 MDM2_FIRST = 25                   # receptor chain A starts at crystal residue 25
 MDM2_LEN = 85                     # 25..109 inclusive
@@ -57,7 +61,7 @@ def dist(p, q):
 
 
 def pick_from_score():
-    scs = sorted(glob.glob(os.path.join(ROOT, "cp_mdm2_*.sc")), key=os.path.getmtime)
+    scs = sorted(glob.glob(os.path.join(ROOT, "cp_%s_*.sc" % SET)), key=os.path.getmtime)
     if not scs:
         return []
     hdr, rows = None, []
