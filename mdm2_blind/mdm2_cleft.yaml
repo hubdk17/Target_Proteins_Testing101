@@ -1,0 +1,39 @@
+# BoltzGen design spec - de novo binder against MDM2, AIMED at the p53 hydrophobic cleft.
+# Site-specific counterpart to mdm2_bindany.yaml (bind-anywhere). This is the clean
+# aimed-vs-aimed comparison against RFdiffusion, and the agreed "site-specific" follow-up
+# to the baseline bind-anywhere run.
+#
+# Target: MDM2 p53-binding domain, chain A, residues 25-109 (mdm2_receptor.pdb, same dir).
+# The chain is CONTIGUOUS 25-109 with no gaps (verified from the PDB).
+#
+# binding_types pins the binder to the cleft hotspots. BoltzGen indexes target residues
+# 1-BASED and sequential (canonical mmcif index, NOT the author/crystal number). Since the
+# chain is contiguous, crystal -> 1-based position is a fixed -24 offset:
+#   crystal 61 Ile -> 37      crystal 93 Val -> 69
+#   crystal 62 Met -> 38      crystal 99 Ile -> 75
+#   crystal 67 Tyr -> 43
+# These are the canonical MDM2 L-pocket residues (the face p53 F19/W23/L26 bind).
+#
+# VERIFY FIRST with `boltzgen check mdm2_cleft.yaml`: confirm it reads the binding site as
+# the cleft (not another face) BEFORE spending GPU. A wrong index silently aims the run.
+#
+# Run (from this dir, weights pre-cached, skip ESMFold2 analysis - no CUDA-13 driver):
+#   boltzgen run mdm2_cleft.yaml --output <out> --protocol protein-anything \
+#     --num_designs 20 --steps design inverse_folding folding filtering
+#
+entities:
+  # Designed de novo binder; length randomly sampled per design (matches bind-anywhere).
+  - protein:
+      id: B
+      sequence: 60..100
+
+  # Target extracted from the PDB (path relative to this .yaml), aimed at the cleft.
+  - file:
+      path: mdm2_receptor.pdb
+      include:
+        - chain:
+            id: A
+      binding_types:
+        - chain:
+            id: A
+            binding: 37,38,43,69,75
