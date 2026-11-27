@@ -2,25 +2,29 @@
 """
 Convert BoltzGen inverse-folded designs into binder-first complex PDBs for our
 gate-3 (AF2 initial-guess pae_interaction) - the SAME scoring we ran on
-RFdiffusion, so the two generators are judged on one independent metric.
+RFdiffusion, so the generators are judged on one independent metric.
 
-BoltzGen output `intermediate_designs_inverse_folded/mdm2_bindany_NN.cif`:
+BoltzGen output `<run>/intermediate_designs_inverse_folded/<spec>_NN.cif`:
   chain A = the de novo binder (designed, variable length 60-100)
-  chain B = MDM2 (fixed target, 85 res)
-(confirmed 2026-11-27: chain A length varies across designs, chain B is always 85
-and carries the MDM2 sequence.)
+  chain B = MDM2 (fixed target, 85 res, seq ETLVRPKPLLLK...)
 
 We write the binder FIRST as chain B (renumbered from 201) and MDM2 as chain A
 (renumbered from 25), residue numbers unique across chains - matching
 43_build_complex, so predict.py's binder-first requirement holds and
 46_mdm2_chimerax maps the hotspots the same way after AF2 renumbers the pose.
-
 Uses the DESIGNED cif, NOT refold_cif/ (the Boltz-2 refold), to keep AF2
 independent of Boltz's own structure prediction.
 
-    source ~/rfd/venv_boltzgen/bin/activate        # gemmi lives here
-    cd ~/rfd && python3 scripts/47_bg_to_complex.py
-Writes cplx_in/mdm2bg/mdm2bg_<NN>.pdb and ~/rfd/inputs/mdm2bg.tsv.
+Which run to convert, and what to call the complex set (env vars):
+  SET      complex-set name -> cplx_in/<SET>/ and inputs/<SET>.tsv  (default mdm2bg)
+  BG_GLOB  glob under ~/rfd/outputs for the boltzgen run dir; newest match wins
+           (default bg_mdm2_bindany_*)
+Examples:
+  source ~/rfd/venv_boltzgen/bin/activate        # gemmi lives here
+  # unaimed baseline (defaults):
+  cd ~/rfd && python3 scripts/47_bg_to_complex.py
+  # aimed p53-cleft run:
+  cd ~/rfd && SET=mdm2cleft BG_GLOB='bg_mdm2_cleft_*' python3 scripts/47_bg_to_complex.py
 """
 import glob
 import os
@@ -29,12 +33,17 @@ import sys
 import gemmi
 
 ROOT = os.path.expanduser("~/rfd")
-SRC = os.path.join(ROOT, "outputs", "bg_mdm2_bindany_1126_1057",
-                   "intermediate_designs_inverse_folded")
-OUT = os.path.join(ROOT, "cplx_in", "mdm2bg")
+SET = os.environ.get("SET", "mdm2bg")
+BG_GLOB = os.environ.get("BG_GLOB", "bg_mdm2_bindany_*")
+OUT = os.path.join(ROOT, "cplx_in", SET)
 MDM2_PREFIX = "ETLVRPKPLLLK"   # MDM2 p53-domain start, to confirm the target chain
 BINDER_START = 201
 TARGET_START = 25
+
+
+def newest_run():
+    dirs = [d for d in glob.glob(os.path.join(ROOT, "outputs", BG_GLOB)) if os.path.isdir(d)]
+    return max(dirs, key=os.path.getmtime) if dirs else None
 
 
 def seq(chain):
@@ -90,37 +99,45 @@ def convert(cif, problems):
     om.add_chain(copy_chain(binder, "B", BINDER_START))   # binder FIRST
     om.add_chain(copy_chain(target, "A", TARGET_START))   # MDM2 second
     out.setup_entities()
-    path = os.path.join(OUT, "mdm2bg_%s.pdb" % idx)
+    path = os.path.join(OUT, "%s_%s.pdb" % (SET, idx))
     out.write_pdb(path)
 
     degen = seq(binder).startswith(MDM2_PREFIX)
-    print("  mdm2bg_%s  binder %d res (B:201..), MDM2 %d res (A:25..)  OK%s"
-          % (idx, nb, nt, "   <- degenerate: binder seq ~MDM2" if degen else ""))
+    print("  %s_%s  binder %d res (B:201..), MDM2 %d res (A:25..)  OK%s"
+          % (SET, idx, nb, nt, "   <- degenerate: binder seq ~MDM2" if degen else ""))
     return 1
 
 
 def main():
-    cifs = sorted(glob.glob(os.path.join(SRC, "mdm2_bindany_*.cif")))
+    run = newest_run()
+    if not run:
+        print("no boltzgen run dir matching %s under %s/outputs" % (BG_GLOB, ROOT))
+        return 1
+    src = os.path.join(run, "intermediate_designs_inverse_folded")
+    cifs = sorted(glob.glob(os.path.join(src, "*.cif")))
     if not cifs:
-        print("no design cifs in %s" % SRC)
+        print("no design cifs in %s" % src)
         return 1
     os.makedirs(OUT, exist_ok=True)
-    print("converting %d BoltzGen designs -> %s" % (len(cifs), OUT))
+    print("run: %s" % run)
+    print("converting %d BoltzGen designs (set=%s) -> %s" % (len(cifs), SET, OUT))
     print("-" * 64)
     problems, made = [], 0
     for c in cifs:
         made += convert(c, problems)
-    tsv = os.path.join(ROOT, "inputs", "mdm2bg.tsv")
+    tsv = os.path.join(ROOT, "inputs", "%s.tsv" % SET)
     os.makedirs(os.path.dirname(tsv), exist_ok=True)
     with open(tsv, "w") as fh:
-        fh.write("mdm2bg\tBoltzGen\t-\t-\t-\t-\n")
+        fh.write("%s\tBoltzGen\t-\t-\t-\t-\n" % SET)
     print("-" * 64)
     print("wrote %d complex input(s); table %s" % (made, tsv))
     if problems:
         print("PROBLEMS:")
         for p in problems:
             print("  " + p)
-    print("next: TABLE=%s TAG=bg sbatch --exclude=dgxanode03 --array=1 scripts/45_gate3_complex.sbatch" % tsv)
+    tag = "bg" if SET == "mdm2bg" else SET.replace("mdm2", "bg")
+    print("next: TABLE=%s TAG=%s sbatch --exclude=dgxanode03,dgxanode04 --array=1 scripts/45_gate3_complex.sbatch"
+          % (tsv, tag))
     return 0
 
 
