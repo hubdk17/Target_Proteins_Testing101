@@ -1,0 +1,17 @@
+# mdm2bg_01 - open this file from the folder that holds the .pdb
+open mdm2bg_01_af2pred.pdb
+hide atoms
+show cartoon
+color /A cornflower blue
+color /B light gray
+# aimed p53-cleft hotspots (MDM2 61,62,67,93,99 -> these renumbered ids)
+show /B:113,114,119,145,151 atoms
+style /B:113,114,119,145,151 stick
+color /B:113,114,119,145,151 orange
+# the real interface, computed geometrically (cannot be mis-numbered)
+select /A & /B :<5
+show sel atoms
+style sel stick
+color sel gold
+select clear
+view
