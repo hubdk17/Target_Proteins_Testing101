@@ -49,7 +49,7 @@ def copy_chain(src, cid, start):
         nr.name = res.name
         nr.seqid = gemmi.SeqId(n, ' ')
         for at in res:
-            if at.element.is_hydrogen():
+            if at.element.atomic_number == 1:   # skip hydrogens
                 continue
             na = gemmi.Atom()
             na.name = at.name
