@@ -1,0 +1,23 @@
+# BoltzGen - de novo binder vs the p53 DNA-binding domain (DBD), WHOLE SURFACE (bind-anywhere).
+# Target: wild-type p53 core domain, 2OCJ chain A, residues 96-289
+#   (p53dbd_wt_receptor.pdb - protein chain only; structural Zn and the 3 extra crystal copies
+#   dropped, target held rigid). Produce the receptor first:
+#     cd ~/rfd/scripts && python3 p53_dbd/extract_p53_receptors.py
+# First p53-DBD run, mirrors the MDM2 bind-anywhere baseline. The DBD is heavily represented in
+# the PDB, so like MDM2 this is a strong-baseline target, not an out-of-training test.
+#
+#   boltzgen run p53dbd_bindany.yaml --output <out> --protocol protein-anything \
+#     --num_designs 20 --steps design inverse_folding folding
+#
+entities:
+  # Designed de novo binder; length sampled per design.
+  - protein:
+      id: B
+      sequence: 60..100
+
+  # Target extracted from the PDB (path relative to this .yaml).
+  - file:
+      path: p53dbd_wt_receptor.pdb
+      include:
+        - chain:
+            id: A

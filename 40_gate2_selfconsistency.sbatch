@@ -31,7 +31,8 @@
 #SBATCH --error=logs/%x_%A_%a.err
 
 IMAGE=/home/hpc_apps/nvidia+pytorch+25.04-py3.sqsh
-TABLE="$HOME/rfd/inputs/targets.tsv"
+# Overridable so a single-target table (e.g. mdm2_blind/mdm2_rfd.tsv) can drive it.
+TABLE="${TABLE:-$HOME/rfd/inputs/targets.tsv}"
 TAG="${TAG:-b1}"
 
 test -s "$TABLE" || { echo "$TABLE missing - run 02_prep_targets.py"; exit 1; }
