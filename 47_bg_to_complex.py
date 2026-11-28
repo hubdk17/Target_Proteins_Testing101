@@ -5,26 +5,29 @@ gate-3 (AF2 initial-guess pae_interaction) - the SAME scoring we ran on
 RFdiffusion, so the generators are judged on one independent metric.
 
 BoltzGen output `<run>/intermediate_designs_inverse_folded/<spec>_NN.cif`:
-  chain A = the de novo binder (designed, variable length 60-100)
-  chain B = MDM2 (fixed target, 85 res, seq ETLVRPKPLLLK...)
+  chain A = the de novo binder (designed, variable length)
+  chain B = the fixed target
 
-We write the binder FIRST as chain B (renumbered from 201) and MDM2 as chain A
-(renumbered from 25), residue numbers unique across chains - matching
-43_build_complex, so predict.py's binder-first requirement holds and
-46_mdm2_chimerax maps the hotspots the same way after AF2 renumbers the pose.
-Uses the DESIGNED cif, NOT refold_cif/ (the Boltz-2 refold), to keep AF2
-independent of Boltz's own structure prediction.
+We write the binder FIRST as chain B and the target as chain A, with residue
+numbers unique across chains (the binder is auto-offset clear of the target's
+max), so predict.py's binder-first requirement holds and the site-check maps
+target residues the same way after AF2 renumbers the pose. Uses the DESIGNED cif,
+NOT refold_cif/ (the Boltz-2 refold), to keep AF2 independent of Boltz.
 
-Which run to convert, and what to call the complex set (env vars):
-  SET      complex-set name -> cplx_in/<SET>/ and inputs/<SET>.tsv  (default mdm2bg)
-  BG_GLOB  glob under ~/rfd/outputs for the boltzgen run dir; newest match wins
-           (default bg_mdm2_bindany_*)
+Which run, set name, and TARGET (env vars; defaults = MDM2, so the MDM2 runs are
+unchanged):
+  SET           complex-set name -> cplx_in/<SET>/ and inputs/<SET>.tsv   (default mdm2bg)
+  BG_GLOB       glob under ~/rfd/outputs for the run dir; newest match wins (default bg_mdm2_bindany_*)
+  TARGET_PREFIX first residues of the target chain, to identify/validate it (default MDM2 ETLVRPKPLLLK)
+  TARGET_LEN    expected target residue count (default 85 = MDM2)
+  TARGET_START  crystal-style start number for the target in the output (default 25 = MDM2)
 Examples:
-  source ~/rfd/venv_boltzgen/bin/activate        # gemmi lives here
-  # unaimed baseline (defaults):
-  cd ~/rfd && python3 scripts/47_bg_to_complex.py
-  # aimed p53-cleft run:
-  cd ~/rfd && SET=mdm2cleft BG_GLOB='bg_mdm2_cleft_*' python3 scripts/47_bg_to_complex.py
+  source ~/rfd/venv_boltzgen/bin/activate
+  cd ~/rfd && python3 scripts/47_bg_to_complex.py                                   # MDM2 unaimed (defaults)
+  cd ~/rfd && SET=p53wt   BG_GLOB='bg_p53dbd_bindany_*' TARGET_PREFIX=SVPSQKTYQGSY \
+      TARGET_LEN=194 TARGET_START=96 python3 scripts/47_bg_to_complex.py            # p53 DBD, wild-type core
+  cd ~/rfd && SET=p53pock BG_GLOB='bg_p53dbd_pocket_*'  TARGET_PREFIX=SVPSQKTYQGSY \
+      TARGET_LEN=195 TARGET_START=96 python3 scripts/47_bg_to_complex.py            # p53 DBD, Y220C core
 """
 import glob
 import os
@@ -35,10 +38,14 @@ import gemmi
 ROOT = os.path.expanduser("~/rfd")
 SET = os.environ.get("SET", "mdm2bg")
 BG_GLOB = os.environ.get("BG_GLOB", "bg_mdm2_bindany_*")
+TARGET_PREFIX = os.environ.get("TARGET_PREFIX", "ETLVRPKPLLLK")
+TARGET_LEN = int(os.environ.get("TARGET_LEN", "85"))
+TARGET_START = int(os.environ.get("TARGET_START", "25"))
 OUT = os.path.join(ROOT, "cplx_in", SET)
-MDM2_PREFIX = "ETLVRPKPLLLK"   # MDM2 p53-domain start, to confirm the target chain
-BINDER_START = 201
-TARGET_START = 25
+# Binder numbered clear of the target's max, so numbers are unique across chains
+# (predict.py's input_check requires it). MDM2 target max 109 -> 201; p53 290 -> 301.
+_TMAX = TARGET_START + TARGET_LEN - 1
+BINDER_START = (_TMAX // 100 + 1) * 100 + 1
 
 
 def newest_run():
@@ -81,30 +88,31 @@ def convert(cif, problems):
         problems.append("%s: chains not A/B (%s)" % (idx, have))
         return 0
     binder, target = m["A"], m["B"]
-    # safety: the target chain must be MDM2. If A looks like MDM2 and B doesn't,
-    # they are swapped relative to the expected layout.
-    if not seq(target).startswith(MDM2_PREFIX) and seq(binder).startswith(MDM2_PREFIX):
+    # safety: the target chain must match TARGET_PREFIX. If A looks like the target
+    # and B doesn't, they are swapped relative to the expected layout.
+    if not seq(target).startswith(TARGET_PREFIX) and seq(binder).startswith(TARGET_PREFIX):
         binder, target = target, binder
-    if not seq(target).startswith(MDM2_PREFIX):
-        problems.append("%s: neither chain matches MDM2 prefix" % idx)
+    if not seq(target).startswith(TARGET_PREFIX):
+        problems.append("%s: neither chain matches target prefix %s" % (idx, TARGET_PREFIX))
         return 0
     nb, nt = len(binder), len(target)
-    if nt != 85:
-        problems.append("%s: MDM2 chain has %d res, expected 85" % (idx, nt))
+    if nt != TARGET_LEN:
+        problems.append("%s: target chain has %d res, expected %d" % (idx, nt, TARGET_LEN))
         return 0
 
     out = gemmi.Structure()
     out.add_model(gemmi.Model("1"))
     om = out[0]
     om.add_chain(copy_chain(binder, "B", BINDER_START))   # binder FIRST
-    om.add_chain(copy_chain(target, "A", TARGET_START))   # MDM2 second
+    om.add_chain(copy_chain(target, "A", TARGET_START))   # target second
     out.setup_entities()
     path = os.path.join(OUT, "%s_%s.pdb" % (SET, idx))
     out.write_pdb(path)
 
-    degen = seq(binder).startswith(MDM2_PREFIX)
-    print("  %s_%s  binder %d res (B:201..), MDM2 %d res (A:25..)  OK%s"
-          % (SET, idx, nb, nt, "   <- degenerate: binder seq ~MDM2" if degen else ""))
+    degen = seq(binder).startswith(TARGET_PREFIX)
+    print("  %s_%s  binder %d res (B:%d..), target %d res (A:%d..)  OK%s"
+          % (SET, idx, nb, BINDER_START, nt, TARGET_START,
+             "   <- degenerate: binder seq ~target" if degen else ""))
     return 1
 
 
@@ -120,7 +128,9 @@ def main():
         return 1
     os.makedirs(OUT, exist_ok=True)
     print("run: %s" % run)
-    print("converting %d BoltzGen designs (set=%s) -> %s" % (len(cifs), SET, OUT))
+    print("set=%s target_prefix=%s target_len=%d target_start=%d binder_start=%d"
+          % (SET, TARGET_PREFIX, TARGET_LEN, TARGET_START, BINDER_START))
+    print("converting %d BoltzGen designs -> %s" % (len(cifs), OUT))
     print("-" * 64)
     problems, made = [], 0
     for c in cifs:
