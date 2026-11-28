@@ -1,0 +1,36 @@
+# BoltzGen - de novo binder vs the p53 Y220C DRUGGABLE POCKET.
+# Target: Y220C p53 core domain, 2J1X chain A, residues 96-290
+#   (p53dbd_y220c_receptor.pdb - protein chain only). Residue 220 is CYS: the Y220C mutation that
+#   removes Tyr220's ring and opens the surface cavity. Produce the receptor first:
+#     cd ~/rfd/scripts && python3 p53_dbd/extract_p53_receptors.py
+#
+# binding_types pins the binder to the cavity lining. BoltzGen indexes target residues 1-BASED and
+# sequential (canonical mmcif index, NOT the author/crystal number). The chain is contiguous
+# 96-290, so crystal -> 1-based is a fixed -95 offset. Cavity-lining residues, verified from the
+# structure (nearest heavy-atom distance to the Cys220 site):
+#   crystal 145 Leu -> 50     crystal 157 Val -> 62
+#   crystal 147 Val -> 52     crystal 220 Cys -> 125
+#   crystal 151 Pro -> 56     crystal 257 Leu -> 162
+#   crystal 155 Thr -> 60
+# VERIFY FIRST with `boltzgen check p53dbd_pocket.yaml`: the visualization must mark the pocket,
+# not another face, before spending GPU.
+#
+#   boltzgen run p53dbd_pocket.yaml --output <out> --protocol protein-anything \
+#     --num_designs 20 --steps design inverse_folding folding
+#
+entities:
+  # Designed de novo binder; length sampled per design.
+  - protein:
+      id: B
+      sequence: 60..100
+
+  # Target, aimed at the Y220C cavity.
+  - file:
+      path: p53dbd_y220c_receptor.pdb
+      include:
+        - chain:
+            id: A
+      binding_types:
+        - chain:
+            id: A
+            binding: 50,52,56,60,62,125,162
